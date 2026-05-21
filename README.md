@@ -22,7 +22,7 @@ Before we touch the code, you need three standard pieces of software installed o
    * **Mac:** Press `Cmd + Space`, type `Terminal`, and press Enter.
 2. Copy the following command, paste it into the terminal, and press Enter:
    ```bash
-   git clone [https://github.com/MJmtsweni/sizana-app.git](https://github.com/MJmtsweni/sizana-app.git)
+   git clone [https://github.com/MJmtsweni/sizana-app-beta.git](https://github.com/MJmtsweni/sizana-app-beta.git)
 
 ---
 Phase 3: Run the App
