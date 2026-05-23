@@ -1,219 +1,129 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  FlatList, 
-  KeyboardAvoidingView, 
-  Platform, 
-  StyleSheet,
-  ActivityIndicator
+  View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, 
+  KeyboardAvoidingView, Platform, ActivityIndicator 
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
-import { chatService } from '../../lib/chatService';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Define the type for your navigation params
-type RootStackParamList = {
-  Chat: { receiverId: string; receiverName: string };
-};
-
-export default function ChatScreen({ route }: any) {
-  // receiverId comes from the navigation (e.g., clicking a user profile)
-  const { receiverId, receiverName } = route.params;
-  
-  const [messages, setMessages] = useState<any[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  
+export default function ChatScreen({ route, navigation }: any) {
+  const { session, recipientId, recipientName } = route.params;
+  const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
 
-useEffect(() => {
-  let channel: any;
+  const [messages, setMessages] = useState<any[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const startChat = async () => {
-    setLoading(true);
+  useEffect(() => {
+    fetchMessages();
+  }, []);
+
+  async function fetchMessages() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setCurrentUserId(user.id);
-        
-        // Fetch initial history
-        const history = await chatService.getConversation(receiverId);
-        setMessages(history);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .or(`and(sender_id.eq.${session.user.id},receiver_id.eq.${recipientId}),and(sender_id.eq.${recipientId},receiver_id.eq.${session.user.id})`)
+        .order('created_at', { ascending: true });
 
-        // --- Set up Realtime Subscription INSIDE the user check ---
-        channel = supabase
-          .channel(`chat-${receiverId}`)
-          .on('postgres_changes', 
-            { 
-              event: 'INSERT', 
-              schema: 'public', 
-              table: 'direct_messages' 
-            }, 
-            (payload) => {
-              const msg = payload.new;
-              // Validate the "Packet" belongs to this specific connection
-              if (
-                (msg.sender_id === receiverId && msg.receiver_id === user.id) ||
-                (msg.sender_id === user.id && msg.receiver_id === receiverId)
-              ) {
-                setMessages((prev) => [...prev, msg]);
-              }
-            }
-          )
-          .subscribe();
-      }
+      if (error) throw error;
+      if (data) setMessages(data);
     } catch (error) {
-      console.error("Connection Error:", error);
+      console.error("Error fetching messages:", error);
     } finally {
       setLoading(false);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
     }
-  };
-
-  if (receiverId) {
-    startChat();
   }
 
-  // "Teardown" the connection when the component unmounts
-  return () => {
-    if (channel) {
-      supabase.removeChannel(channel);
-    }
-  };
-}, [receiverId]);
-
-  const handleSend = async () => {
+  async function handleSend() {
     if (!inputText.trim()) return;
-    const tempText = inputText;
-    setInputText(''); // Clear input immediately for better UX
-    
-    try {
-      await chatService.sendMessage(receiverId, tempText);
-    } catch (error: any) {
-      console.error("Send failed:", error.message);
-    }
-  };
 
-  if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
+    const newMessage = {
+      sender_id: session.user.id,
+      receiver_id: recipientId,
+      content: inputText.trim(),
+    };
+
+    // Optimistic UI update for instant feedback
+    setMessages(prev => [...prev, { ...newMessage, id: Date.now().toString(), created_at: new Date().toISOString() }]);
+    setInputText('');
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+    // Database Insert
+    await supabase.from('messages').insert([newMessage]);
   }
+
+  const renderMessage = ({ item }: { item: any }) => {
+    const isMe = item.sender_id === session.user.id;
+    return (
+      <View style={[styles.messageBubble, isMe ? styles.myMessage : styles.theirMessage]}>
+        <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.theirMessageText]}>
+          {item.content}
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-      style={styles.container}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 25}
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{receiverName || "Conversation"}</Text>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 45) }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
+          <Ionicons name="arrow-back" size={24} color="#1E293B" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{recipientName || 'Chat'}</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={[
-            styles.bubble, 
-            item.sender_id === currentUserId ? styles.myMessage : styles.theirMessage
-          ]}>
-            <Text style={item.sender_id === currentUserId ? styles.myText : styles.theirText}>
-              {item.content}
-            </Text>
-            <View style={styles.statusRow}>
-      <Text style={styles.timestamp}>{formatTime(item.created_at)}</Text>
-      {item.sender_id === currentUserId && (
-        <Text style={styles.checkMark}>{item.is_read ? ' ✓✓' : ' ✓'}</Text>
+      {loading ? (
+        <View style={styles.centered}><ActivityIndicator color="#3B82F6" /></View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
+          showsVerticalScrollIndicator={false}
+          onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+        />
       )}
-    </View>
-          </View>
-        )}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        contentContainerStyle={{ paddingVertical: 10 }}
-      />
 
-      <View style={styles.inputArea}>
+      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <TextInput
           style={styles.textInput}
+          placeholder="Type a message..."
           value={inputText}
           onChangeText={setInputText}
-          placeholder="Message..."
           multiline
         />
-        <TouchableOpacity style={styles.sendIcon} onPress={handleSend}>
-          <Text style={styles.sendLabel}>Send</Text>
+        <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
+          <Ionicons name="send" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-const formatTime = (timestamp: string) => {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { 
-    padding: 15, 
-    backgroundColor: '#fff', 
-    borderBottomWidth: 1, 
-    borderColor: '#eee', 
-    alignItems: 'center' 
-  },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#333' },
-  bubble: { 
-    padding: 12, 
-    borderRadius: 18, 
-    marginVertical: 4, 
-    marginHorizontal: 12, 
-    maxWidth: '75%' 
-  },
-  myMessage: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
-  theirMessage: { alignSelf: 'flex-start', backgroundColor: '#E9E9EB' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B' },
   
-  // MERGED myText - No more duplicates
-  myText: { color: '#fff', fontSize: 16 }, 
-  theirText: { color: '#000', fontSize: 16 },
+  messageBubble: { maxWidth: '80%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, marginBottom: 12 },
+  myMessage: { alignSelf: 'flex-end', backgroundColor: '#3B82F6', borderBottomRightRadius: 4 },
+  theirMessage: { alignSelf: 'flex-start', backgroundColor: '#E2E8F0', borderBottomLeftRadius: 4 },
+  messageText: { fontSize: 15, lineHeight: 22 },
+  myMessageText: { color: '#fff' },
+  theirMessageText: { color: '#1E293B' },
 
-  statusRow: {
-    flexDirection: 'row',
-    alignSelf: 'flex-end',
-    marginTop: 4,
-    alignItems: 'center',
-  },
-  timestamp: {
-    fontSize: 10,
-    // Using a lighter color for the sender's bubble (white-ish)
-    // and a darker one for the receiver's bubble
-  },
-  checkMark: {
-    fontSize: 10,
-    color: '#fff',
-    marginLeft: 3,
-  },
-  inputArea: { 
-    flexDirection: 'row', 
-    padding: 10, 
-    paddingBottom: Platform.OS === 'android' ? 25 : 10,
-    backgroundColor: '#fff', 
-    borderTopWidth: 1, 
-    borderColor: '#eee' 
-  },
-  textInput: { 
-    flex: 1, 
-    backgroundColor: '#F1F3F5', 
-    borderRadius: 20, 
-    paddingHorizontal: 15, 
-    paddingVertical: 8, 
-    fontSize: 16, 
-    maxHeight: 100 
-  },
-  sendIcon: { marginLeft: 10, justifyContent: 'center', paddingHorizontal: 5 },
-  sendLabel: { color: '#007AFF', fontWeight: 'bold', fontSize: 16 }
+  inputContainer: { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#fff', padding: 12, borderTopWidth: 1, borderTopColor: '#E2E8F0' },
+  textInput: { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, fontSize: 15, color: '#1E293B', maxHeight: 100 },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', marginLeft: 12, marginBottom: 2 }
 });

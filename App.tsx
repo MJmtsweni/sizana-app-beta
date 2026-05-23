@@ -1,7 +1,8 @@
+import * as Linking from 'expo-linking';
 import 'react-native-url-polyfill/auto';
 import React, { useEffect, useState, useCallback } from 'react';
 import { LogBox, View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native'; 
-import { NavigationContainer, useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/native'; 
+import { NavigationContainer, useNavigation, useIsFocused, useFocusEffect, LinkingOptions } from '@react-navigation/native'; 
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,9 @@ import EventsScreen from './src/screens/main/EventsScreen';
 import ProfileScreenDefault from './src/screens/main/ProfileScreen';
 import ChatScreen from './src/screens/main/ChatScreen';
 import InboxScreen from './src/screens/main/InboxScreen';
+import ThreadScreen from './src/screens/main/ThreadScreen';
+import NotificationsScreen from './src/screens/main/NotificationsScreen';
+import EventDetailScreen from './src/screens/main/EventDetailScreen';
 
 const ProfileScreen = ProfileScreenDefault as React.ComponentType<any>;
 
@@ -32,6 +36,7 @@ function MainTabs({ session }: any) {
 
   const [userRecord, setUserRecord] = useState<any>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [hasUnreadAlerts, setHasUnreadAlerts] = useState(false);
 
   // 1. MEMOIZED FETCH — stable reference, only rebuilds on user ID change
   const fetchGlobalUnreadCount = useCallback(async () => {
@@ -51,12 +56,32 @@ function MainTabs({ session }: any) {
     }
   }, [session?.user?.id]);
 
+  // 1.5 MEMOIZED NOTIFICATION CHECK
+  const fetchNotificationStatus = useCallback(async () => {
+    if (!session?.user?.id) return;
+    try {
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('receiver_id', session.user.id)
+        .eq('is_read', false);
+
+      if (error) throw error;
+      setHasUnreadAlerts(count ? count > 0 : false);
+    } catch (e) {
+      console.error("Global notification badge error:", e);
+    }
+  }, [session?.user?.id]);
+
   // 2. FOCUS EFFECT — refetches badge count every time this screen comes into focus
   useFocusEffect(
     useCallback(() => {
       fetchGlobalUnreadCount();
-    }, [fetchGlobalUnreadCount])
+      fetchNotificationStatus();
+    }, [fetchGlobalUnreadCount, fetchNotificationStatus])
   );
+
+
 
   // 3. PROFILE LOAD + STABLE REALTIME CHANNEL — no navigation or isFocused in deps
   useEffect(() => {
@@ -143,8 +168,23 @@ function MainTabs({ session }: any) {
         <Ionicons name="grid" size={28} color="#34C759" />
       </TouchableOpacity>
     </View>
-      {/* 3. RIGHT COLUMN: Inbox Icon & Badge */}
-    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+      {/* 3. RIGHT COLUMN: Bell & Inbox */}
+      <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' }}>
+
+        {/* NEW BELL ICON */}
+      <TouchableOpacity
+        onPress={() => navigation.navigate('Notifications', { session: session })}
+        style={[styles.inboxButton, { marginRight: 16 }]}
+      >
+       <View style={{ position: 'relative' }}>
+      <Ionicons name="notifications" size={24} color="#34C759" />
+      {/* THE RED DOT */}
+      {hasUnreadAlerts && (
+        <View style={styles.redDotBadge} />
+      )}
+    </View>
+      </TouchableOpacity>
+
       <TouchableOpacity
         onPress={() => navigation.navigate('Inbox', { session: session })}
         style={styles.inboxButton}
@@ -171,9 +211,9 @@ function MainTabs({ session }: any) {
         component={MarketScreen}
         initialParams={{ session: session }}
       />
-      <Tab.Screen name="Forums" component={ForumsScreen} />
-      <Tab.Screen name="Business" component={BusinessScreen} />
-      <Tab.Screen name="Events" component={EventsScreen} />
+      <Tab.Screen name="Forums" component={ForumsScreen} initialParams={{ session: session }} />
+      <Tab.Screen name="Business" component={BusinessScreen} initialParams={{ session: session }} />
+      <Tab.Screen name="Events" component={EventsScreen} initialParams={{ session: session }} />
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
@@ -182,6 +222,36 @@ function MainTabs({ session }: any) {
     </Tab.Navigator>
   );
 }
+
+// Define the deep linking prefixes and routing map
+const prefix = Linking.createURL('/');
+
+const linking: LinkingOptions<any> = {
+  prefixes: [prefix, 'sizana://', 'https://sizana.com'],
+  config: {
+    screens: {
+      // 1. Map to your main tabs
+      Main: {
+        screens: {
+          'Buy & Sell': 'market',
+          Forums: 'forums',
+          Business: 'business',
+          Events: 'events',
+          Profile: 'profile',
+        },
+      },
+      // 2. Map to specific detail screens inside your Stack
+      Inbox: 'inbox',
+      Thread: 'thread/:id',
+      Notifications: 'notifications',
+      
+      // 3. THE EVENT INVITE LINK
+      // This tells the app: "If a URL looks like sizana://event/ABC, 
+      // extract 'ABC' as an 'id' parameter and open the EventDetail screen."
+      EventDetail: 'event/:id', 
+    },
+  },
+};
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -206,7 +276,7 @@ export default function App() {
   }, []);
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
   <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Dashboard">
     {session && session.user ? (
       <>
@@ -237,6 +307,28 @@ export default function App() {
           component={InboxScreen} 
           initialParams={{ session: session }}
           options={{ headerShown: true, title: 'My Messages' }} 
+        />
+
+        <Stack.Screen 
+          name="Notifications" 
+          component={NotificationsScreen} 
+          initialParams={{ session: session }}
+          options={{ headerShown: false }} 
+        />
+
+        {/* NEW: The landing page for Event Deep Links */}
+        <Stack.Screen 
+          name="EventDetail" 
+          component={EventDetailScreen} // We will build this next!
+          initialParams={{ session: session }}
+          options={{ headerShown: false }} 
+        />
+
+        <Stack.Screen 
+          name="Thread" 
+          component={ThreadScreen} 
+          initialParams={{ session: session }}
+          options={{ headerShown: false }} 
         />
         
         <Stack.Screen name="Profile" component={ProfileScreen} />
@@ -298,5 +390,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'center',
     lineHeight: 14
+  },
+  redDotBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#FF3B30',
+    borderWidth: 1.5,
+    borderColor: '#fff'
   },
 });

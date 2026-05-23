@@ -25,7 +25,7 @@ export default function MarketScreen({ route, session: directSession, navigation
   const [locationQuery, setLocationQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
 
-  // Creation Modal States
+  // Creation / Edit Modal States
   const [modalVisible, setModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newPrice, setNewPrice] = useState('');
@@ -34,7 +34,10 @@ export default function MarketScreen({ route, session: directSession, navigation
   const [newDescription, setNewDescription] = useState('');
   const [newImageUrl, setNewImageUrl] = useState('');
 
-  // --- NEW: DETAILS SHEET MODAL STATES ---
+  // Edit mode — holds the ID of the listing being edited, null when creating
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+
+  // Details Sheet Modal States
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
 
@@ -138,6 +141,7 @@ export default function MarketScreen({ route, session: directSession, navigation
     }
   }
 
+  // Unified create / edit handler — branches on editingItemId
   async function handleCreateListing() {
     if (!newTitle || !newPrice) {
       Alert.alert('Missing Fields', 'Please fill in a title and price.');
@@ -146,26 +150,40 @@ export default function MarketScreen({ route, session: directSession, navigation
 
     try {
       setLoading(true);
-      const { error } = await supabase
-        .from('market_items')
-        .insert({
-          title: newTitle,
-          price: parseFloat(newPrice),
-          category: newCategory,
-          location: newLocation,
-          description: newDescription,
-          image_url: newImageUrl,
-          seller_id: session.user.id
-        });
 
-      if (error) throw error;
+      const payload = {
+        title: newTitle,
+        price: parseFloat(newPrice),
+        category: newCategory,
+        location: newLocation,
+        description: newDescription,
+        image_url: newImageUrl,
+      };
 
-      Alert.alert('Success', 'Your item is now live on the marketplace!');
+      if (editingItemId) {
+        // --- EDIT MODE: update existing row ---
+        const { error } = await supabase
+          .from('market_items')
+          .update(payload)
+          .eq('id', editingItemId);
+
+        if (error) throw error;
+        Alert.alert('Updated', 'Your listing has been updated successfully!');
+      } else {
+        // --- CREATE MODE: insert new row ---
+        const { error } = await supabase
+          .from('market_items')
+          .insert({ ...payload, seller_id: session.user.id });
+
+        if (error) throw error;
+        Alert.alert('Success', 'Your item is now live on the marketplace!');
+      }
+
       setModalVisible(false);
       clearForm();
       fetchListings();
     } catch (error: any) {
-      Alert.alert('Listing Creation Error', error.message);
+      Alert.alert('Listing Error', error.message);
       setLoading(false);
     }
   }
@@ -177,9 +195,52 @@ export default function MarketScreen({ route, session: directSession, navigation
     setNewImageUrl('');
     setNewCategory('Farming');
     setNewLocation('Schweizer-Reneke');
+    setEditingItemId(null); // Reset edit mode on form clear
   };
 
-  // --- NEW: CHAT INITIATION ROUTING HANDLER ---
+  // Opens the manage alert for the item owner (edit or delete)
+  const handleManageListing = () => {
+    if (!selectedItem) return;
+
+    Alert.alert('Manage Listing', 'What would you like to do?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Edit',
+        onPress: () => {
+          // Pre-populate form with current listing data
+          setNewTitle(selectedItem.title);
+          setNewPrice(String(selectedItem.price));
+          setNewDescription(selectedItem.description || '');
+          setNewLocation(selectedItem.location || 'Schweizer-Reneke');
+          setNewCategory(selectedItem.category);
+          setNewImageUrl(selectedItem.image_url || '');
+          setEditingItemId(selectedItem.id); // Flag edit mode
+
+          setDetailsModalVisible(false);
+          setModalVisible(true);
+        }
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase
+            .from('market_items')
+            .delete()
+            .eq('id', selectedItem.id);
+
+          if (error) {
+            Alert.alert('Delete Failed', error.message);
+          } else {
+            setDetailsModalVisible(false);
+            fetchListings();
+          }
+        }
+      }
+    ]);
+  };
+
+  // Chat initiation routing handler
   const handleMessageSeller = () => {
     if (!selectedItem) return;
 
@@ -190,10 +251,8 @@ export default function MarketScreen({ route, session: directSession, navigation
 
     setDetailsModalVisible(false);
     
-    // Smoothly redirects to the Chat View while carrying operational workspace references
     navigation.navigate('Inbox', {
       session: session,
-      // FIXED: Removed the onGoBack function to prevent serialization warnings!
       sellerId: selectedItem.seller_id,
       sellerName: selectedItem.users?.username || 'Sizana Member',
       itemTitle: selectedItem.title,
@@ -209,7 +268,7 @@ export default function MarketScreen({ route, session: directSession, navigation
       activeOpacity={0.9}
       onPress={() => {
         setSelectedItem(item);
-        setDetailsModalVisible(true); // Switches into full screen UX presentation card sheet
+        setDetailsModalVisible(true);
       }}
     >
       <View style={styles.imageContainer}>
@@ -310,13 +369,19 @@ export default function MarketScreen({ route, session: directSession, navigation
         <Text style={styles.fabText}>Sell</Text>
       </TouchableOpacity>
 
-      {/* --- CREATE LISTING MODAL SHEET --- */}
-      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
+      {/* --- CREATE / EDIT LISTING MODAL SHEET --- */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => { setModalVisible(false); clearForm(); }}
+      >
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create New Listing</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
+              {/* Title changes based on create vs edit mode */}
+              <Text style={styles.modalTitle}>{editingItemId ? 'Edit Listing' : 'Create New Listing'}</Text>
+              <TouchableOpacity onPress={() => { setModalVisible(false); clearForm(); }}>
                 <Ionicons name="close-circle" size={28} color="#64748B" />
               </TouchableOpacity>
             </View>
@@ -356,26 +421,39 @@ export default function MarketScreen({ route, session: directSession, navigation
               <Text style={styles.fieldLabel}>Item Description</Text>
               <TextInput style={[styles.modalInput, styles.modalTextArea]} value={newDescription} onChangeText={setNewDescription} multiline numberOfLines={3} placeholder="Provide item details..." />
 
+              {/* Button label changes based on mode */}
               <TouchableOpacity style={styles.submitListingButton} onPress={handleCreateListing}>
-                <Text style={styles.submitButtonText}>Publish Listing</Text>
+                <Text style={styles.submitButtonText}>{editingItemId ? 'Save Changes' : 'Publish Listing'}</Text>
               </TouchableOpacity>
             </ScrollView>
           </KeyboardAvoidingView>
         </View>
       </Modal>
 
-      {/* --- NEW: HIGH-FIDELITY  MARKETPLACE ITEM DETAILS SHEET --- */}
+      {/* --- HIGH-FIDELITY MARKETPLACE ITEM DETAILS SHEET --- */}
       <Modal animationType="fade" transparent={true} visible={detailsModalVisible} onRequestClose={() => setDetailsModalVisible(false)}>
         <View style={styles.detailsModalOverlay}>
           <View style={styles.detailsModalContent}>
             
-            {/* Top Navigation Row over Details */}
+            {/* Top Navigation Row */}
             <View style={styles.detailsHeaderActions}>
               <TouchableOpacity style={styles.circularCloseButton} onPress={() => setDetailsModalVisible(false)}>
                 <Ionicons name="arrow-back" size={24} color="#1E293B" />
               </TouchableOpacity>
+
               <Text style={styles.detailsHeaderTitle}>Market Item</Text>
-              <View style={{ width: 40 }} /> {/* Layout Spacer Balance */}
+
+              {/* Show manage button only to the item owner, spacer for everyone else */}
+              {selectedItem?.seller_id === session?.user?.id ? (
+                <TouchableOpacity
+                  style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                  onPress={handleManageListing}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={24} color="#1E293B" />
+                </TouchableOpacity>
+              ) : (
+                <View style={{ width: 40 }} />
+              )}
             </View>
 
             {selectedItem && (
@@ -432,11 +510,14 @@ export default function MarketScreen({ route, session: directSession, navigation
                     </View>
                   </View>
 
-                  {/* 3. TRANSACTION ACTION CTA BUTTON */}
-                  <TouchableOpacity style={styles.messageSellerActionButton} onPress={handleMessageSeller}>
-                    <Ionicons name="chatbubble-ellipses" size={20} color="#fff" style={{ marginRight: 8 }} />
-                    <Text style={styles.messageSellerButtonText}>Message Seller</Text>
-                  </TouchableOpacity>
+                  {/* 3. TRANSACTION ACTION CTA BUTTON
+                      Hidden when viewing your own listing — use the ellipsis to manage instead */}
+                  {selectedItem.seller_id !== session?.user?.id && (
+                    <TouchableOpacity style={styles.messageSellerActionButton} onPress={handleMessageSeller}>
+                      <Ionicons name="chatbubble-ellipses" size={20} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.messageSellerButtonText}>Message Seller</Text>
+                    </TouchableOpacity>
+                  )}
 
                 </View>
               </ScrollView>
