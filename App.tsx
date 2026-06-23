@@ -5,6 +5,7 @@ import { LogBox, View, Text, TouchableOpacity, StyleSheet, Image } from 'react-n
 import { NavigationContainer, useNavigation, useIsFocused, useFocusEffect, LinkingOptions } from '@react-navigation/native'; 
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import BusinessProfileScreen from './src/screens/main/BusinessProfileScreen';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from './src/lib/supabase';
 import { Session } from '@supabase/supabase-js';
@@ -66,10 +67,15 @@ function MainTabs({ session }: any) {
         .eq('receiver_id', session.user.id)
         .eq('is_read', false);
 
-      if (error) throw error;
+      if (error) {
+        // Catch silent DB rejections or RLS blocks gracefully
+        console.warn("[Sizana] Notification Badge Warn:", error.message || "Silent DB rejection");
+        return; 
+      }
+      
       setHasUnreadAlerts(count ? count > 0 : false);
     } catch (e) {
-      console.error("Global notification badge error:", e);
+      console.warn("[Sizana] Network drop during notification badge fetch.");
     }
   }, [session?.user?.id]);
 
@@ -180,7 +186,8 @@ function MainTabs({ session }: any) {
       <Ionicons name="notifications" size={24} color="#34C759" />
       {/* THE RED DOT */}
       {hasUnreadAlerts && (
-        <View style={styles.redDotBadge} />
+        <View style={styles.redDotBadge} pointerEvents="none">
+        </View>
       )}
     </View>
       </TouchableOpacity>
@@ -327,6 +334,13 @@ export default function App() {
         <Stack.Screen 
           name="Thread" 
           component={ThreadScreen} 
+          initialParams={{ session: session }}
+          options={{ headerShown: false }} 
+        />
+
+        <Stack.Screen 
+          name="BusinessProfile" 
+          component={BusinessProfileScreen} 
           initialParams={{ session: session }}
           options={{ headerShown: false }} 
         />

@@ -18,6 +18,7 @@ export default function ProfileScreen({ route, navigation }: any) {
   const [userEvents, setUserEvents] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('Posts');
   const [loading, setLoading] = useState(true);
+  const [userListings, setUserListings] = useState<any[]>([]);
 
   // Edit Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -89,6 +90,13 @@ export default function ProfileScreen({ route, navigation }: any) {
       if (bizData) {
         setUserBusinesses(bizData.map((b: any) => b.businesses));
       }
+
+      const { data: marketData } = await supabase
+        .from('buy_and_sell') // Update if your table has a different name
+        .select('*')
+        .eq('seller_id', session.user.id); // Update if your column is named 'author_id'
+      
+      if (marketData) setUserListings(marketData);
   }
 
   async function pickImage() {
@@ -267,7 +275,7 @@ export default function ProfileScreen({ route, navigation }: any) {
 
       {/* TABS */}
       <View style={styles.tabContainer}>
-        {['Posts', 'My RSVPs', 'Businesses'].map(tab => (
+        {['Posts', 'My RSVPs', 'Businesses', 'Marketplace'].map(tab => (
           <TouchableOpacity 
             key={tab} 
             style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
@@ -319,6 +327,26 @@ export default function ProfileScreen({ route, navigation }: any) {
               </TouchableOpacity>
             )
           }} 
+        />
+      )}
+
+      {activeTab === 'Marketplace' && (
+        <FlatList 
+          data={userListings} 
+          keyExtractor={(item) => item.id} 
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          ListEmptyComponent={
+            <View style={styles.emptyLayout}>
+              <Ionicons name="pricetag-outline" size={48} color="#CBD5E1" />
+              <Text style={styles.emptyText}>You haven't listed any items.</Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.activityCard}>
+              <Text style={styles.activityTitle}>{item.title}</Text>
+              <Text style={styles.activityMetaText}>Price: R{item.price}</Text>
+            </TouchableOpacity>
+          )} 
         />
       )}
 

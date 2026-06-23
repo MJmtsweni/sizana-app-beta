@@ -2,17 +2,21 @@ import * as Linking from 'expo-linking';
 import React, { useState, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
-  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, ScrollView, Switch, Share
+  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, ScrollView, Switch, Share, Keyboard, TouchableWithoutFeedback
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function EventsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
+
+  const [eventDate, setEventDate] = useState(new Date());
+  const [eventTime, setEventTime] = useState(new Date());
 
   const [allEvents, setAllEvents] = useState<any[]>([]);
   const [filteredEvents, setFilteredEvents] = useState<any[]>([]);
@@ -38,6 +42,12 @@ export default function EventsScreen({ navigation, route }: any) {
 
   const eventCategories = ['All', 'Agriculture', 'Tech & IT', 'Business', 'Entertainment', 'Community'];
   const creationCategories = ['Community', 'Agriculture', 'Tech & IT', 'Business', 'Entertainment'];
+
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const formatDate = (date: Date) => date.toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const formatTime = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   useFocusEffect(
     useCallback(() => {
@@ -164,6 +174,17 @@ export default function EventsScreen({ navigation, route }: any) {
       return;
     }
 
+    const combinedDateTime = new Date(eventDate);
+    combinedDateTime.setHours(eventTime.getHours(), eventTime.getMinutes(), 0, 0);
+
+    if (combinedDateTime.getTime() < new Date().getTime()) {
+      Alert.alert(
+        "Invalid Schedule", 
+        "You cannot schedule an event in the past. Please select a future date and time."
+      );
+      return; // Halts execution so the form stays open
+    }
+
     try {
       setUploading(true);
       let finalImageUrl = null;
@@ -191,8 +212,8 @@ export default function EventsScreen({ navigation, route }: any) {
         description: newDescription,
         location: newLocation,
         category: newCategory,
-        event_date: eventDateObj.toISOString(),
         image_url: finalImageUrl,
+        event_date: combinedDateTime.toISOString(),
         is_private: isPrivate // <-- ADDED TO DB
       });
 
@@ -364,8 +385,9 @@ export default function EventsScreen({ navigation, route }: any) {
 
       {/* CREATE EVENT MODAL */}
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent} keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Host an Event</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
@@ -373,7 +395,7 @@ export default function EventsScreen({ navigation, route }: any) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
               <TouchableOpacity style={styles.imageSelector} onPress={pickImage}>
                 {imageUri ? (
                   <Image source={{ uri: imageUri }} style={styles.selectedImage} />
@@ -411,14 +433,47 @@ export default function EventsScreen({ navigation, route }: any) {
                 />
               </View>
 
-              <Text style={styles.inputLabel}>Date & Time</Text>
-              <TextInput style={styles.inputField} placeholder="YYYY-MM-DD HH:MM (e.g. 2026-10-15 14:00)" value={newDate} onChangeText={setNewDate} />
 
               <Text style={styles.inputLabel}>Location</Text>
               <TextInput style={styles.inputField} placeholder="Venue or Address" value={newLocation} onChangeText={setNewLocation} />
 
               <Text style={styles.inputLabel}>Description</Text>
               <TextInput style={[styles.inputField, { height: 100, textAlignVertical: 'top' }]} multiline placeholder="What should people know?" value={newDescription} onChangeText={setNewDescription} />
+
+                <Text style={styles.inputLabel}>Event Date & Time</Text>
+                <View style={styles.halfInputRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Date</Text>
+                    {Platform.OS === 'ios' ? (
+                      <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
+                         <DateTimePicker value={eventDate} mode="date" display="default" onChange={(e, d) => d && setEventDate(d)} />
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowDatePicker(true)}>
+                        <Text style={{ color: '#1E293B' }}>{formatDate(eventDate)}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {showDatePicker && Platform.OS === 'android' && (
+                      <DateTimePicker value={eventDate} mode="date" display="default" onChange={(e, d) => { setShowDatePicker(false); if (d) setEventDate(d); }} />
+                    )}
+                  </View>
+
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Start Time</Text>
+                    {Platform.OS === 'ios' ? (
+                      <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
+                        <DateTimePicker value={eventTime} mode="time" display="default" onChange={(e, d) => d && setEventTime(d)} />
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowTimePicker(true)}>
+                        <Text style={{ color: '#1E293B' }}>{formatTime(eventTime)}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {showTimePicker && Platform.OS === 'android' && (
+                      <DateTimePicker value={eventTime} mode="time" display="default" onChange={(e, d) => { setShowTimePicker(false); if (d) setEventTime(d); }} />
+                    )}
+                  </View>
+                </View>
 
               <TouchableOpacity style={styles.publishButton} onPress={handleCreateEvent} disabled={uploading}>
                 {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Publish Event</Text>}
@@ -427,6 +482,7 @@ export default function EventsScreen({ navigation, route }: any) {
             </ScrollView>
           </KeyboardAvoidingView>
         </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -502,6 +558,7 @@ const styles = StyleSheet.create({
   privacyToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   privacyToggleTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
   privacyToggleSubtitle: { fontSize: 12, color: '#64748B', marginTop: 4 },
+  halfInputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
 
   inputLabel: { fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 },
   inputField: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: '#1E293B', marginBottom: 16 },

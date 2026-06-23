@@ -21,19 +21,44 @@ export default function NotificationsScreen({ navigation, route }: any) {
   );
 
   const handleClearAll = async () => {
-  Alert.alert("Clear Activity", "Are you sure you want to delete all notifications?", [
-    { text: "Cancel", style: "cancel" },
-    { text: "Clear All", style: "destructive", onPress: async () => {
-        try {
-          await supabase.from('notifications').delete().eq('receiver_id', session.user.id);
-          setNotifications([]);
-        } catch (error) {
-          console.error(error);
-        }
-    }}
-  ]);
-};
+    Alert.alert("Clear Activity", "Are you sure you want to delete all notifications?", [
+      { text: "Cancel", style: "cancel" },
+      { 
+        text: "Clear All", 
+        style: "destructive", 
+        onPress: async () => {
+          // 1. Optional UX: Set loading state here if you have one for the whole screen
+          try {
+            const { data, error } = await supabase
+              .from('notifications')
+              .delete()
+              .eq('receiver_id', session.user.id)
+              .select(); // <-- Crucial: Forces Supabase to return the deleted rows
 
+            // 2. Explicitly throw the Supabase error so the catch block triggers
+            if (error) throw error;
+
+            // 3. Check for silent RLS failures
+            if (!data || data.length === 0) {
+               // If there were notifications on screen, but the DB deleted 0 rows, it failed.
+               if (notifications.length > 0) {
+                 Alert.alert("Delete Failed", "The database blocked the deletion. Please check your permissions.");
+                 fetchNotifications(); // Refresh the screen to restore the true database state
+                 return;
+               }
+            }
+
+            // 4. If we reach here, the database successfully wiped the rows!
+            setNotifications([]);
+            
+          } catch (error: any) {
+            Alert.alert("Error clearing notifications", error.message);
+            fetchNotifications(); // Restore the UI if the network dropped
+          }
+        }
+      }
+    ]);
+  };
   async function fetchNotifications() {
     if (!session?.user?.id) return;
     try {
@@ -121,8 +146,12 @@ export default function NotificationsScreen({ navigation, route }: any) {
           ) : (
             <Ionicons name="person-circle" size={44} color="#CBD5E1" />
           )}
-          {/* Action Icon Badge overlay */}
-          <View style={[styles.actionBadge, isLike ? { backgroundColor: '#EF4444' } : { backgroundColor: '#3B82F6' }]}>
+          
+          {/* 1. ADD pointerEvents HERE */}
+          <View 
+            style={[styles.actionBadge, isLike ? { backgroundColor: '#EF4444' } : { backgroundColor: '#3B82F6' }]}
+            pointerEvents="none" 
+          >
             <Ionicons name={isLike ? "heart" : "chatbubble"} size={10} color="#fff" />
           </View>
         </View>
@@ -135,7 +164,9 @@ export default function NotificationsScreen({ navigation, route }: any) {
           <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
         </View>
 
-        {!item.is_read && <View style={styles.unreadDot} />}
+        {/* 2. ADD pointerEvents HERE */}
+        {!item.is_read && <View style={styles.unreadDot} pointerEvents="none" />}
+        
       </TouchableOpacity>
     );
   };
@@ -143,14 +174,14 @@ export default function NotificationsScreen({ navigation, route }: any) {
   return (
     <View style={styles.mainContainer}>
       {/* HEADER */}
-      <View style={styles.navPanel}>
+      <View style={[styles.navPanel, { zIndex: 10, elevation: 10 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#1E293B" />
         </TouchableOpacity>
         <Text style={styles.navTitle}>Activity Center</Text>
-        <TouchableOpacity onPress={handleClearAll} style={{ padding: 4 }}>
-    <Ionicons name="trash-outline" size={24} color="#EF4444" />
-  </TouchableOpacity>
+      <TouchableOpacity onPress={handleClearAll} style={{ padding: 8, zIndex: 11 }}>
+          <Ionicons name="trash-outline" size={24} color="#EF4444" />
+        </TouchableOpacity>
       </View>
 
       {/* NOTIFICATIONS LIST */}

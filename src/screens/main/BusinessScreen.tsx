@@ -1,18 +1,21 @@
 import React, { useState, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
-  TextInput, ActivityIndicator, Platform, Alert, ScrollView, Modal, KeyboardAvoidingView
+  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
+  ScrollView, Keyboard, TouchableWithoutFeedback, Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import * as Linking from 'expo-linking';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { supabase } from '../../lib/supabase'; // Adjust path if necessary
 
 export default function BusinessScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
+  const [openTime, setOpenTime] = useState(new Date(new Date().setHours(8, 0, 0, 0))); // Defaults to 08:00
+  const [closeTime, setCloseTime] = useState(new Date(new Date().setHours(17, 0, 0, 0))); // Defaults to 17:00
 
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [filteredBusinesses, setFilteredBusinesses] = useState<any[]>([]);
@@ -21,14 +24,32 @@ export default function BusinessScreen({ navigation, route }: any) {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
-  const categories = ['All', 'Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
+  
+  // Excluded 'All' from the registration form choices to prevent users from creating an 'All' business
+  const filterCategories = ['All', 'Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
+  const formCategories = ['Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
 
   const [modalVisible, setModalVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newBiz, setNewBiz] = useState({
-    name: '', category: 'Services', description: '', location: '',
-    contact_email: '', contact_phone: '', whatsapp_number: '', operating_hours: '', logoUri: null as string | null
+    name: '', 
+    category: 'Services', 
+    description: '', 
+    location: '',
+    contact_email: '', 
+    contact_phone: '', 
+    whatsapp_number: '', 
+    website_url: '', 
+    logoUri: null as string | null, 
+    coverPhotoUri: null as string | null 
   });
+
+  // Track visibility for Android modals
+  const [showOpenPicker, setShowOpenPicker] = useState(false);
+  const [showClosePicker, setShowClosePicker] = useState(false);
+
+  // Formatting helper for the UI and Database
+  const formatTime = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
   // Gallery State
   const [galleryModalVisible, setGalleryModalVisible] = useState(false);
@@ -89,6 +110,11 @@ export default function BusinessScreen({ navigation, route }: any) {
     if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, logoUri: result.assets[0].uri });
   }
 
+  async function pickCoverPhoto() {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 9], quality: 0.8 });
+    if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, coverPhotoUri: result.assets[0].uri });
+  }
+
   async function handleRegisterBusiness() {
     if (!newBiz.name || !newBiz.location) {
       Alert.alert('Missing Info', 'Business name and location are required.');
@@ -97,7 +123,9 @@ export default function BusinessScreen({ navigation, route }: any) {
     try {
       setUploading(true);
       let finalLogoUrl = null;
+      let finalCoverUrl = null;
 
+      // 1. Upload Logo if exists
       if (newBiz.logoUri) {
         const fileExt = newBiz.logoUri.split('.').pop()?.toLowerCase() || 'jpg';
         const fileName = `biz-${Date.now()}.${fileExt}`;
@@ -109,11 +137,32 @@ export default function BusinessScreen({ navigation, route }: any) {
         finalLogoUrl = data.publicUrl;
       }
 
+      // 2. Upload Cover Photo if exists
+      if (newBiz.coverPhotoUri) {
+        const fileExt = newBiz.coverPhotoUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const fileName = `cover-${Date.now()}.${fileExt}`;
+        const formData = new FormData();
+        formData.append('file', { uri: newBiz.coverPhotoUri, name: fileName, type: `image/${fileExt}` } as any);
+        const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
+        finalCoverUrl = data.publicUrl;
+      }
+
+      // 3. Insert Database Record
       const { data: insertedBiz, error } = await supabase.from('businesses').insert({
-        creator_id: session.user.id, name: newBiz.name, category: newBiz.category,
-        description: newBiz.description, location: newBiz.location, contact_email: newBiz.contact_email,
-        contact_phone: newBiz.contact_phone, whatsapp_number: newBiz.whatsapp_number,
-        operating_hours: newBiz.operating_hours, logo_url: finalLogoUrl
+        creator_id: session.user.id, 
+        name: newBiz.name, 
+        category: newBiz.category,
+        description: newBiz.description, 
+        location: newBiz.location, 
+        contact_email: newBiz.contact_email,
+        contact_phone: newBiz.contact_phone, 
+        whatsapp_number: newBiz.whatsapp_number,
+        website_url: newBiz.website_url,
+        operating_hours: `${formatTime(openTime)} - ${formatTime(closeTime)}`,
+        logo_url: finalLogoUrl,
+        cover_photo_url: finalCoverUrl
       }).select().single();
 
       if (error) throw error;
@@ -124,7 +173,12 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       setModalVisible(false);
       fetchBusinesses();
-      setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', operating_hours: '', logoUri: null });
+      
+      // Full Form Reset
+      setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', website_url: '', logoUri: null, coverPhotoUri: null });
+      setOpenTime(new Date(new Date().setHours(8, 0, 0, 0)));
+      setCloseTime(new Date(new Date().setHours(17, 0, 0, 0)));
+
     } catch (e: any) {
       Alert.alert('Registration Failed', e.message);
     } finally {
@@ -132,7 +186,6 @@ export default function BusinessScreen({ navigation, route }: any) {
     }
   }
 
-  // GALLERY UPLOAD FUNCTION
   async function handleAddGalleryItem() {
     if (!galleryImageUri || !activeBusinessId) return;
     try {
@@ -162,7 +215,6 @@ export default function BusinessScreen({ navigation, route }: any) {
     }
   }
 
-  // DELETE FUNCTION
   const handleDeleteBusiness = (bizId: string) => {
     Alert.alert("Delete Business", "Are you sure? This will remove the listing and its gallery permanently.", [
       { text: "Cancel", style: "cancel" },
@@ -174,7 +226,11 @@ export default function BusinessScreen({ navigation, route }: any) {
   };
 
   const renderBusinessCard = ({ item }: { item: any }) => (
-    <View style={styles.bizCard}>
+    <TouchableOpacity 
+      style={styles.bizCard}
+      activeOpacity={0.9}
+      onPress={() => navigation.navigate('BusinessProfile', { business: item, session: session })}
+    >
       <View style={styles.cardHeader}>
         {item.logo_url ? (
           <Image source={{ uri: item.logo_url }} style={styles.bizLogo} />
@@ -192,7 +248,6 @@ export default function BusinessScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        {/* OWNER ACTIONS MENU */}
         {session?.user?.id === item.creator_id && (
           <TouchableOpacity 
             style={{ padding: 4 }} 
@@ -200,7 +255,6 @@ export default function BusinessScreen({ navigation, route }: any) {
               Alert.alert("Manage Business", "What would you like to do?", [
                 { text: "Cancel", style: "cancel" },
                 { text: "Delete Listing", style: "destructive", onPress: () => handleDeleteBusiness(item.id) }
-                // Note: Edit Screen can be added here as a separate navigation route later
               ]);
             }}
           >
@@ -219,7 +273,6 @@ export default function BusinessScreen({ navigation, route }: any) {
         )}
       </View>
 
-      {/* GALLERY SHOWCASE */}
       {item.gallery && item.gallery.length > 0 && (
         <View style={{ paddingBottom: 16 }}>
           <Text style={{ paddingHorizontal: 16, fontSize: 13, fontWeight: '800', color: '#64748B', marginBottom: 8, textTransform: 'uppercase' }}>Products & Portfolio</Text>
@@ -236,7 +289,6 @@ export default function BusinessScreen({ navigation, route }: any) {
         </View>
       )}
 
-      {/* ADD TO GALLERY BUTTON */}
       {session?.user?.id === item.creator_id && (
         <TouchableOpacity 
           style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0FDF4', marginHorizontal: 16, paddingVertical: 10, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: '#DCFCE7' }}
@@ -264,6 +316,11 @@ export default function BusinessScreen({ navigation, route }: any) {
               <Ionicons name="mail" size={18} color="#475569" />
             </TouchableOpacity>
           )}
+          {item.website_url && (
+            <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(item.website_url.startsWith('http') ? item.website_url : `https://${item.website_url}`)}>
+              <Ionicons name="globe-outline" size={18} color="#475569" />
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </View>
 
@@ -278,7 +335,7 @@ export default function BusinessScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -295,7 +352,7 @@ export default function BusinessScreen({ navigation, route }: any) {
           <TextInput style={styles.searchInput} placeholder="Search businesses..." value={searchQuery} onChangeText={setSearchQuery} />
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-          {categories.map(cat => (
+          {filterCategories.map(cat => (
             <TouchableOpacity key={cat} style={[styles.categoryPill, activeCategory === cat && styles.categoryPillActive]} onPress={() => setActiveCategory(cat)}>
               <Text style={[styles.categoryPillText, activeCategory === cat && styles.categoryPillTextActive]}>{cat}</Text>
             </TouchableOpacity>
@@ -325,13 +382,30 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       {/* REGISTRATION MODAL */}
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalContent} keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Register Business</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}> 
+              
+              {/* COVER PHOTO UPLOAD */}
+              <TouchableOpacity 
+                style={[styles.imageSelector, { width: '100%', height: 120, marginBottom: 16, borderRadius: 12 }]} 
+                onPress={pickCoverPhoto}
+              >
+                {newBiz.coverPhotoUri ? (
+                  <Image source={{ uri: newBiz.coverPhotoUri }} style={{ width: '100%', height: '100%', borderRadius: 12 }} />
+                ) : (
+                  <>
+                    <Ionicons name="image-outline" size={32} color="#94A3B8" />
+                    <Text style={styles.imagePlaceholderText}>Upload Cover Photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
               <View style={styles.imagePickerRow}>
                 <TouchableOpacity style={styles.imageSelector} onPress={pickImage}>
                   {newBiz.logoUri ? <Image source={{ uri: newBiz.logoUri }} style={styles.selectedLogo} /> : <><Ionicons name="image-outline" size={28} color="#94A3B8" /><Text style={styles.imagePlaceholderText}>Upload Logo</Text></>}
@@ -341,12 +415,69 @@ export default function BusinessScreen({ navigation, route }: any) {
                   <TextInput style={styles.inputField} placeholder="Company Name" value={newBiz.name} onChangeText={t => setNewBiz({...newBiz, name: t})} />
                 </View>
               </View>
+
+              {/* INTERACTIVE CATEGORY SELECTOR UX */}
+              <Text style={styles.inputLabel}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                {formCategories.map(cat => (
+                  <TouchableOpacity 
+                    key={cat} 
+                    style={[styles.categoryPill, newBiz.category === cat && styles.categoryPillActive, { marginRight: 8, marginBottom: 0 }]} 
+                    onPress={() => setNewBiz({...newBiz, category: cat})}
+                  >
+                    <Text style={[styles.categoryPillText, newBiz.category === cat && styles.categoryPillTextActive]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={styles.inputLabel}>Website (Optional)</Text>
+              <TextInput style={styles.inputField} placeholder="www.example.com" keyboardType="url" autoCapitalize="none" value={newBiz.website_url} onChangeText={t => setNewBiz({...newBiz, website_url: t})} />
+
               <Text style={styles.inputLabel}>About</Text>
               <TextInput style={[styles.inputField, { height: 80, textAlignVertical: 'top' }]} multiline value={newBiz.description} onChangeText={t => setNewBiz({...newBiz, description: t})} />
+              
               <View style={styles.halfInputRow}>
-                <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.inputLabel}>Location</Text><TextInput style={styles.inputField} value={newBiz.location} onChangeText={t => setNewBiz({...newBiz, location: t})} /></View>
-                <View style={{ flex: 1, marginLeft: 8 }}><Text style={styles.inputLabel}>Hours</Text><TextInput style={styles.inputField} value={newBiz.operating_hours} onChangeText={t => setNewBiz({...newBiz, operating_hours: t})} /></View>
-              </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>Location</Text>
+                    <TextInput style={styles.inputField} placeholder="e.g. Schweizer-Reneke" value={newBiz.location} onChangeText={t => setNewBiz({...newBiz, location: t})} />
+                  </View>
+                </View>
+
+                {/* NATIVE TIME PICKERS */}
+                <Text style={styles.inputLabel}>Operating Hours</Text>
+                <View style={styles.halfInputRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Opening Time</Text>
+                    {Platform.OS === 'ios' ? (
+                      <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
+                         <DateTimePicker value={openTime} mode="time" display="default" onChange={(e, d) => d && setOpenTime(d)} />
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowOpenPicker(true)}>
+                        <Text style={{ color: '#1E293B' }}>{formatTime(openTime)}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {showOpenPicker && Platform.OS === 'android' && (
+                      <DateTimePicker value={openTime} mode="time" display="default" onChange={(e, d) => { setShowOpenPicker(false); if (d) setOpenTime(d); }} />
+                    )}
+                  </View>
+
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Closing Time</Text>
+                    {Platform.OS === 'ios' ? (
+                      <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
+                        <DateTimePicker value={closeTime} mode="time" display="default" onChange={(e, d) => d && setCloseTime(d)} />
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowClosePicker(true)}>
+                        <Text style={{ color: '#1E293B' }}>{formatTime(closeTime)}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {showClosePicker && Platform.OS === 'android' && (
+                      <DateTimePicker value={closeTime} mode="time" display="default" onChange={(e, d) => { setShowClosePicker(false); if (d) setCloseTime(d); }} />
+                    )}
+                  </View>
+                </View>
               <Text style={styles.sectionHeader}>Contact</Text>
               <View style={styles.halfInputRow}>
                 <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.inputLabel}>Phone</Text><TextInput style={styles.inputField} keyboardType="phone-pad" value={newBiz.contact_phone} onChangeText={t => setNewBiz({...newBiz, contact_phone: t})} /></View>
@@ -355,43 +486,45 @@ export default function BusinessScreen({ navigation, route }: any) {
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput style={styles.inputField} keyboardType="email-address" value={newBiz.contact_email} onChangeText={t => setNewBiz({...newBiz, contact_email: t})} />
               <TouchableOpacity style={styles.publishButton} onPress={handleRegisterBusiness} disabled={uploading}>
-                {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Register</Text>}
+                {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Register Business</Text>}
               </TouchableOpacity>
               <View style={{ height: 40 }} />
             </ScrollView>
           </KeyboardAvoidingView>
         </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
-      {/* GALLERY UPLOAD MODAL (Moved outside of the lists!) */}
+      {/* GALLERY UPLOAD MODAL (UX Wrapper applied) */}
       <Modal animationType="fade" transparent={true} visible={galleryModalVisible} onRequestClose={() => setGalleryModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add to Portfolio</Text>
-              <TouchableOpacity onPress={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
-            </View>
-            <TouchableOpacity 
-              style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]} 
-              onPress={async () => {
-                const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
-                if (!result.canceled) setGalleryImageUri(result.assets[0].uri);
-              }}
-            >
-              {galleryImageUri ? <Image source={{ uri: galleryImageUri }} style={styles.selectedLogo} /> : <Text style={styles.imagePlaceholderText}>Tap to select image</Text>}
-            </TouchableOpacity>
-            <Text style={styles.inputLabel}>Product Label (Optional)</Text>
-            <TextInput style={styles.inputField} placeholder="e.g. Summer Shoes" value={galleryLabel} onChangeText={setGalleryLabel} />
-            <TouchableOpacity style={styles.publishButton} onPress={handleAddGalleryItem} disabled={uploadingGallery || !galleryImageUri}>
-              {uploadingGallery ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
-            </TouchableOpacity>
-          </KeyboardAvoidingView>
-        </View>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add to Portfolio</Text>
+                <TouchableOpacity onPress={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
+              </View>
+              <TouchableOpacity 
+                style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]} 
+                onPress={async () => {
+                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+                  if (!result.canceled) setGalleryImageUri(result.assets[0].uri);
+                }}
+              >
+                {galleryImageUri ? <Image source={{ uri: galleryImageUri }} style={styles.selectedLogo} /> : <Text style={styles.imagePlaceholderText}>Tap to select image</Text>}
+              </TouchableOpacity>
+              <Text style={styles.inputLabel}>Product Label (Optional)</Text>
+              <TextInput style={styles.inputField} placeholder="e.g. Summer Shoes" value={galleryLabel} onChangeText={setGalleryLabel} />
+              <TouchableOpacity style={styles.publishButton} onPress={handleAddGalleryItem} disabled={uploadingGallery || !galleryImageUri}>
+                {uploadingGallery ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
+              </TouchableOpacity>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
