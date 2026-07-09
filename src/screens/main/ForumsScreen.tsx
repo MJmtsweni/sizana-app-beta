@@ -38,7 +38,6 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
   const topics = ['General Discussion', 'Farming & Agriculture', 'Tech & IT', 'Vehicles', 'Local News'];
 
-  // Trigger data fetch on screen focus
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
@@ -88,7 +87,6 @@ export default function ForumsScreen({ navigation, route, session: directSession
         .select('id, name, logo_url')
         .eq('creator_id', session.user.id);
       
-      console.log("[DEBUG] Owned Businesses:", data);  
       if (error) throw error;
       if (data) setOwnedBusinesses(data);
     } catch (e: any) {
@@ -97,12 +95,14 @@ export default function ForumsScreen({ navigation, route, session: directSession
   }
 
   const toggleLike = async (postId: string, currentlyLiked: boolean) => {
+    // Optimistic update
     setPosts(prev => prev.map(p => {
       if (p.id === postId) {
         return { ...p, isLiked: !currentlyLiked, likesCount: currentlyLiked ? p.likesCount - 1 : p.likesCount + 1 };
       }
       return p;
     }));
+
     if (currentlyLiked) {
       await supabase.from('forum_likes').delete().match({ post_id: postId, user_id: session.user.id });
     } else {
@@ -110,12 +110,29 @@ export default function ForumsScreen({ navigation, route, session: directSession
     }
   };
 
-  const toggleFollow = async (postId: string, currentlyFollowing: boolean) => {
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, isFollowing: !currentlyFollowing } : p));
+  // Now accepts the full post object so we can read author_id for the notification
+  const toggleFollow = async (post: any, currentlyFollowing: boolean) => {
+    // Optimistic update
+    setPosts(prev => prev.map(p => p.id === post.id ? { ...p, isFollowing: !currentlyFollowing } : p));
+
     if (currentlyFollowing) {
-      await supabase.from('forum_follows').delete().match({ post_id: postId, user_id: session.user.id });
+      // Unfollow — just delete the record, no notification needed
+      await supabase.from('forum_follows').delete().match({ post_id: post.id, user_id: session.user.id });
     } else {
-      await supabase.from('forum_follows').insert({ post_id: postId, user_id: session.user.id });
+      // Follow
+      await supabase.from('forum_follows').insert({ post_id: post.id, user_id: session.user.id });
+
+      // Notify the post author — skip if the user is following their own post
+      if (post.author_id && post.author_id !== session.user.id) {
+        const { error: notifError } = await supabase.from('notifications').insert({
+          actor_id: session.user.id,    // Who followed
+          receiver_id: post.author_id,  // Post author gets notified
+          type: 'follow',
+          target_id: post.id,           // So we can navigate to the post later
+          is_read: false,
+        });
+        if (notifError) console.error('Forum follow notification error:', notifError.message);
+      }
     }
   };
 
@@ -147,8 +164,6 @@ export default function ForumsScreen({ navigation, route, session: directSession
       if (mediaUri && !mediaUri.startsWith('http')) {
         const fileExt = mediaUri.split('.').pop()?.toLowerCase() || 'jpg';
         const fileName = `post-${Date.now()}.${fileExt}`;
-        const response = await fetch(mediaUri);
-        const blob = await response.blob();
         const formData = new FormData();
         formData.append('file', { uri: mediaUri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
@@ -198,7 +213,6 @@ export default function ForumsScreen({ navigation, route, session: directSession
   };
 
   const renderPostCard = ({ item }: { item: any }) => {
-    // Logic: If item.business exists, use its logo and name; otherwise default to author
     const displayAvatar = item.business?.logo_url || item.author?.avatar_url;
     const displayName = item.business?.name || item.author?.username || 'Community Member';
 
@@ -220,29 +234,46 @@ export default function ForumsScreen({ navigation, route, session: directSession
             </View>
           </View>
 
-          {/* MANAGE BUTTON (Only for Post Author) */}
-          {session?.user?.id === item.author_id && (
-            <TouchableOpacity 
-              style={styles.manageButton} 
-              onPress={() => {
-                Alert.alert("Manage", "Options", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Edit", onPress: () => { 
-                      setEditingPostId(item.id); setNewTitle(item.title); 
-                      setNewContent(item.content); setNewTopic(item.topic); 
-                      setMediaUri(item.media_url); setDisableComments(item.comments_disabled); 
-                      setPostingAsBusinessId(item.business_id || null); setCreateModalVisible(true); 
-                  }},
-                  { text: "Delete", style: "destructive", onPress: async () => { 
-                      await supabase.from('forum_posts').delete().eq('id', item.id); 
-                      fetchPosts(); 
-                  }}
-                ]);
-              }}
+          <View style={styles.headerActions}>
+            {/* Follow Button */}
+            <TouchableOpacity
+              style={[styles.followButton, item.isFollowing && styles.followButtonActive]}
+              onPress={() => toggleFollow(item, item.isFollowing)}
             >
-              <Ionicons name="ellipsis-horizontal" size={20} color="#64748B" />
+              <Ionicons
+                name={item.isFollowing ? "notifications" : "notifications-outline"}
+                size={14}
+                color={item.isFollowing ? "#fff" : "#34C759"}
+              />
+              <Text style={[styles.followText, item.isFollowing && styles.followTextActive]}>
+                {item.isFollowing ? 'Following' : 'Follow'}
+              </Text>
             </TouchableOpacity>
-          )}
+
+            {/* MANAGE BUTTON (Only for Post Author) */}
+            {session?.user?.id === item.author_id && (
+              <TouchableOpacity 
+                style={styles.manageButton} 
+                onPress={() => {
+                  Alert.alert("Manage", "Options", [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Edit", onPress: () => { 
+                        setEditingPostId(item.id); setNewTitle(item.title); 
+                        setNewContent(item.content); setNewTopic(item.topic); 
+                        setMediaUri(item.media_url); setDisableComments(item.comments_disabled); 
+                        setPostingAsBusinessId(item.business_id || null); setCreateModalVisible(true); 
+                    }},
+                    { text: "Delete", style: "destructive", onPress: async () => { 
+                        await supabase.from('forum_posts').delete().eq('id', item.id); 
+                        fetchPosts(); 
+                    }}
+                  ]);
+                }}
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color="#64748B" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* BODY */}
@@ -266,6 +297,9 @@ export default function ForumsScreen({ navigation, route, session: directSession
             <Ionicons name="chatbox-outline" size={20} color="#64748B" />
             <Text style={styles.actionText}>{item.commentsCount}</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={() => handleShare(item.title, item.topic)}>
+            <Ionicons name="share-social-outline" size={20} color="#64748B" />
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -273,19 +307,47 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
   return (
     <View style={styles.mainContainer}>
-      <View style={styles.navPanel}>
+      <View style={[styles.navPanel, { paddingTop: Math.max(insets.top, 45) }]}>
         <Text style={styles.navTitle}>Community Forums</Text>
-        <TouchableOpacity onPress={() => setCreateModalVisible(true)}><Ionicons name="create-outline" size={26} color="#34C759" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setCreateModalVisible(true)}>
+          <Ionicons name="create-outline" size={26} color="#34C759" />
+        </TouchableOpacity>
       </View>
-      <FlatList data={posts} keyExtractor={(item) => item.id} renderItem={renderPostCard} onRefresh={() => { setRefreshing(true); fetchPosts(); }} refreshing={refreshing} />
-      
-      
+
+      {loading && !refreshing ? (
+        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+      ) : (
+        <FlatList
+          data={posts}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPostCard}
+          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          onRefresh={() => { setRefreshing(true); fetchPosts(); }}
+          refreshing={refreshing}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.centered}>
+              <Ionicons name="chatbubbles-outline" size={60} color="#CBD5E1" />
+              <Text style={styles.emptyText}>No posts yet. Start a conversation!</Text>
+            </View>
+          }
+        />
+      )}
+
       {/* CREATE / EDIT POST MODAL SHEET */}
-      <Modal animationType="slide" transparent={true} visible={createModalVisible} onRequestClose={() => { setCreateModalVisible(false); clearForm(); }}>
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={createModalVisible}
+        onRequestClose={() => { setCreateModalVisible(false); clearForm(); }}
+      >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent} keyboardVerticalOffset={60}>
-              
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.modalContent}
+              keyboardVerticalOffset={60}
+            >
               <View style={[styles.modalHeader, { marginBottom: 12 }]}>
                 <Text style={styles.modalTitle}>{editingPostId ? 'Edit Post' : 'Start a Topic'}</Text>
                 <TouchableOpacity onPress={() => { setCreateModalVisible(false); clearForm(); }}>
@@ -294,88 +356,96 @@ export default function ForumsScreen({ navigation, route, session: directSession
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 30 }}>
-  
-  {/* 1. IDENTITY SELECTOR */}
-  {ownedBusinesses.length > 0 && (
-    <View style={{ marginBottom: 20 }}>
-      <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Post As</Text>
-      <View style={{ height: 50 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <TouchableOpacity 
-            style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
-            onPress={() => setPostingAsBusinessId(null)}
-          >
-            <Ionicons name="person-circle" size={24} color={postingAsBusinessId === null ? "#34C759" : "#64748B"} />
-            <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>My Profile</Text>
-          </TouchableOpacity>
-          {ownedBusinesses.map((biz) => (
-            <TouchableOpacity 
-              key={biz.id}
-              style={[styles.identityPill, postingAsBusinessId === biz.id && styles.identityPillActive]}
-              onPress={() => setPostingAsBusinessId(biz.id)}
-            >
-              {biz.logo_url ? (
-                <Image source={{ uri: biz.logo_url }} style={{ width: 24, height: 24, borderRadius: 12 }} />
-              ) : (
-                <Ionicons name="briefcase" size={24} color={postingAsBusinessId === biz.id ? "#34C759" : "#64748B"} />
-              )}
-              <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>
-                {biz.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    </View>
-  )}
 
-  {/* 2. TOPIC SELECTOR */}
-  <Text style={styles.inputLabel}>Topic Category</Text>
-  <FlatList 
-    horizontal 
-    showsHorizontalScrollIndicator={false}
-    data={topics}
-    style={{ maxHeight: 45, marginBottom: 16 }}
-    renderItem={({item}) => (
-      <TouchableOpacity 
-        style={[styles.topicPill, newTopic === item && styles.topicPillActive]}
-        onPress={() => setNewTopic(item)}
-      >
-        <Text style={[styles.topicText, newTopic === item && styles.topicTextActive]}>{item}</Text>
-      </TouchableOpacity>
-    )}
-  />
+                {/* 1. IDENTITY SELECTOR */}
+                {ownedBusinesses.length > 0 && (
+                  <View style={{ marginBottom: 20 }}>
+                    <Text style={[styles.inputLabel, { marginBottom: 8 }]}>Post As</Text>
+                    <View style={{ height: 50 }}>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        <TouchableOpacity 
+                          style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
+                          onPress={() => setPostingAsBusinessId(null)}
+                        >
+                          <Ionicons name="person-circle" size={24} color={postingAsBusinessId === null ? "#34C759" : "#64748B"} />
+                          <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>My Profile</Text>
+                        </TouchableOpacity>
+                        {ownedBusinesses.map((biz) => (
+                          <TouchableOpacity 
+                            key={biz.id}
+                            style={[styles.identityPill, postingAsBusinessId === biz.id && styles.identityPillActive]}
+                            onPress={() => setPostingAsBusinessId(biz.id)}
+                          >
+                            {biz.logo_url ? (
+                              <Image source={{ uri: biz.logo_url }} style={{ width: 24, height: 24, borderRadius: 12 }} />
+                            ) : (
+                              <Ionicons name="briefcase" size={24} color={postingAsBusinessId === biz.id ? "#34C759" : "#64748B"} />
+                            )}
+                            <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>
+                              {biz.name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </View>
+                )}
 
-  {/* 3.LABELED INPUTS */}
-  <Text style={styles.inputLabel}>Title</Text>
-  <TextInput style={styles.titleInput} placeholder="Topic Title..." value={newTitle} onChangeText={setNewTitle} />
-  
-  <Text style={styles.inputLabel}>Content</Text>
-  <TextInput style={styles.bodyInput} placeholder="What's on your mind?" multiline value={newContent} onChangeText={setNewContent} />
+                {/* 2. TOPIC SELECTOR */}
+                <Text style={styles.inputLabel}>Topic Category</Text>
+                <FlatList 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  data={topics}
+                  style={{ maxHeight: 45, marginBottom: 16 }}
+                  keyExtractor={(item) => item}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity 
+                      style={[styles.topicPill, newTopic === item && styles.topicPillActive]}
+                      onPress={() => setNewTopic(item)}
+                    >
+                      <Text style={[styles.topicText, newTopic === item && styles.topicTextActive]}>{item}</Text>
+                    </TouchableOpacity>
+                  )}
+                />
 
-  <TouchableOpacity style={styles.mediaSelectorBox} onPress={pickMedia}>
-    {mediaUri ? (
-      <Image source={{ uri: mediaUri }} style={styles.selectedMediaPreview} />
-    ) : (
-      <>
-        <Ionicons name="image" size={32} color="#94A3B8" />
-        <Text style={styles.mediaText}>Attach Photo/Video</Text>
-      </>
-    )}
-  </TouchableOpacity>
+                {/* 3. LABELED INPUTS */}
+                <Text style={styles.inputLabel}>Title</Text>
+                <TextInput style={styles.titleInput} placeholder="Topic Title..." value={newTitle} onChangeText={setNewTitle} />
+                
+                <Text style={styles.inputLabel}>Content</Text>
+                <TextInput style={styles.bodyInput} placeholder="What's on your mind?" multiline value={newContent} onChangeText={setNewContent} />
 
-  <View style={styles.toggleRow}>
-    <View style={{ flex: 1, paddingRight: 8 }}>
-      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>Disable Comments</Text>
-    </View>
-    <Switch value={disableComments} onValueChange={setDisableComments} trackColor={{ false: '#E2E8F0', true: '#34C759' }} thumbColor="#fff" />
-  </View>
+                <TouchableOpacity style={styles.mediaSelectorBox} onPress={pickMedia}>
+                  {mediaUri ? (
+                    <Image source={{ uri: mediaUri }} style={styles.selectedMediaPreview} />
+                  ) : (
+                    <>
+                      <Ionicons name="image" size={32} color="#94A3B8" />
+                      <Text style={styles.mediaText}>Attach Photo/Video</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
 
-  <TouchableOpacity style={styles.publishButton} onPress={handlePublishPost}>
-    <Text style={styles.publishButtonText}>{editingPostId ? 'Save Changes' : 'Post'}</Text>
-  </TouchableOpacity>
+                <View style={styles.toggleRow}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>Disable Comments</Text>
+                  </View>
+                  <Switch
+                    value={disableComments}
+                    onValueChange={setDisableComments}
+                    trackColor={{ false: '#E2E8F0', true: '#34C759' }}
+                    thumbColor="#fff"
+                  />
+                </View>
 
-</ScrollView>
+                <TouchableOpacity style={styles.publishButton} onPress={handlePublishPost} disabled={uploading}>
+                  {uploading ? <ActivityIndicator color="#fff" /> : (
+                    <Text style={styles.publishButtonText}>{editingPostId ? 'Save Changes' : 'Post'}</Text>
+                  )}
+                </TouchableOpacity>
+
+              </ScrollView>
             </KeyboardAvoidingView>
           </View>
         </TouchableWithoutFeedback>
@@ -386,101 +456,91 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F1F5F9' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
+  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center' },
   toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8F0'
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12,
+    marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0'
   },
-  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 60 : 45, paddingBottom: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  navPanel: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingBottom: 15,
+    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0'
+  },
   navTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  navIconButton: { marginLeft: 16, padding: 4 },
-
-  postCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  postCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16,
+    elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8
+  },
   postHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  authorRow: { flexDirection: 'row', alignItems: 'center' },
+  authorRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   avatarImage: { width: 40, height: 40, borderRadius: 20 },
-  authorDetails: { marginLeft: 10 },
+  authorDetails: { marginLeft: 10, flex: 1 },
   authorName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   postTopicBadge: { fontSize: 11, fontWeight: '700', color: '#3B82F6', marginTop: 2 },
-  postTime: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  
-  followButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FDF4', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#DCFCE7' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 },
+  followButton: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F0FDF4', paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 16, borderWidth: 1, borderColor: '#DCFCE7'
+  },
   followButtonActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
   followText: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
   followTextActive: { color: '#fff' },
-
+  manageButton: { padding: 5, alignItems: 'center', justifyContent: 'center' },
   postTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
   postBodyText: { fontSize: 14, color: '#475569', lineHeight: 22 },
-  mediaContainer: { width: '100%', height: 200, borderRadius: 12, marginTop: 12, overflow: 'hidden', backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  mediaContainer: {
+    width: '100%', height: 200, borderRadius: 12, marginTop: 12,
+    overflow: 'hidden', backgroundColor: '#E2E8F0',
+    justifyContent: 'center', alignItems: 'center'
+  },
   postMedia: { width: '100%', height: '100%', resizeMode: 'cover', position: 'absolute' },
-  videoOverlay: { position: 'absolute', justifyContent: 'center', alignItems: 'center' },
-
-  postFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12, marginTop: 16, justifyContent: 'space-between' },
-  actionButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8 },
+  postFooter: {
+    flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9',
+    paddingTop: 12, marginTop: 16
+  },
+  actionButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginRight: 4 },
   actionText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
-
-  // Creation Modal Styling
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
+  modalContent: {
+    backgroundColor: '#fff', borderTopLeftRadius: 28,
+    borderTopRightRadius: 28, padding: 24, maxHeight: '90%'
+  },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  
-  topicPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, alignSelf: 'flex-start' },
+  topicPill: {
+    backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: 20, marginRight: 8, alignSelf: 'flex-start'
+  },
   topicPillActive: { backgroundColor: '#3B82F6' },
   topicText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
   topicTextActive: { color: '#fff' },
   inputLabel: { fontSize: 14, fontWeight: '700', color: '#334155', marginBottom: 8 },
-
-  titleInput: { fontSize: 18, fontWeight: '700', color: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 12, marginBottom: 16 },
+  titleInput: {
+    fontSize: 18, fontWeight: '700', color: '#1E293B',
+    borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
+    paddingBottom: 12, marginBottom: 16
+  },
   bodyInput: { fontSize: 15, color: '#334155', height: 100, textAlignVertical: 'top', marginBottom: 16 },
-  
-  mediaSelectorBox: { height: 120, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 24, overflow: 'hidden' },
+  mediaSelectorBox: {
+    height: 120, backgroundColor: '#F8FAFC', borderRadius: 16,
+    borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 24, overflow: 'hidden'
+  },
   mediaText: { fontSize: 13, fontWeight: '600', color: '#94A3B8', marginTop: 8 },
   selectedMediaPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
-
   publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
   publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-
-  headerActions: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 6,
-  marginLeft: 8,},
-
-  manageButton: {
-  padding: 5,
-  alignItems: 'center',
-  justifyContent: 'center',},
-
   identityPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 20,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 8, paddingHorizontal: 16,
+    backgroundColor: '#F8FAFC', borderRadius: 20,
+    marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0',
   },
-  identityPillActive: {
-    backgroundColor: '#F0FDF4',
-    borderColor: '#34C759',
-  },
-  identityText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748B',
-    marginLeft: 8,
-  },
-  identityTextActive: {
-    color: '#34C759',
-  }
+  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
+  identityText: { fontSize: 14, fontWeight: '600', color: '#64748B', marginLeft: 8 },
+  identityTextActive: { color: '#34C759' },
 });

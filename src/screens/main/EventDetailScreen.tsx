@@ -7,7 +7,6 @@ import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EventDetailScreen({ route, navigation }: any) {
-  // Catch the ID whether it comes from a deep link URL (route.params.id) or direct navigation
   const eventId = route.params?.id || route.params?.event?.id;
   const session = route.params?.session;
   const insets = useSafeAreaInsets();
@@ -24,11 +23,13 @@ export default function EventDetailScreen({ route, navigation }: any) {
   async function fetchEventDetails() {
     try {
       setLoading(true);
+      // JOIN with business and creator tables
       const { data, error } = await supabase
         .from('events')
         .select(`
           *,
           creator:creator_id ( username, avatar_url ),
+          business:business_id ( name, logo_url ),
           rsvps:event_rsvps ( user_id )
         `)
         .eq('id', eventId)
@@ -49,15 +50,17 @@ export default function EventDetailScreen({ route, navigation }: any) {
     }
   }
 
+  // --- IDENTITY RESOLUTION ---
+  const displayAvatar = event?.business?.logo_url || event?.creator?.avatar_url;
+  const displayName = event?.business?.name || event?.creator?.username || 'Community Member';
+  const isBusinessEvent = !!event?.business_id;
+
   const toggleRSVP = async () => {
     if (!session?.user?.id) return;
-    
-    // Optimistic UI update
     const currentlyAttending = isAttending;
     setIsAttending(!currentlyAttending);
     setRsvpCount(prev => currentlyAttending ? prev - 1 : prev + 1);
 
-    // Database sync
     if (currentlyAttending) {
       await supabase.from('event_rsvps').delete().match({ event_id: eventId, user_id: session.user.id });
     } else {
@@ -88,7 +91,6 @@ export default function EventDetailScreen({ route, navigation }: any) {
     <View style={styles.mainContainer}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         
-        {/* HERO BANNER */}
         <View style={styles.heroContainer}>
           {event.image_url ? (
             <Image source={{ uri: event.image_url }} style={styles.heroImage} />
@@ -98,16 +100,14 @@ export default function EventDetailScreen({ route, navigation }: any) {
             </View>
           )}
           
-          {/* FLOATING BACK BUTTON */}
           <TouchableOpacity 
             style={[styles.backButton, { top: Math.max(insets.top, 20) }]} 
-            onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')}
+            onPress={() => navigation.goBack()}
           >
             <Ionicons name="arrow-back" size={24} color="#1E293B" />
           </TouchableOpacity>
         </View>
 
-        {/* CONTENT OVERLAP CARD */}
         <View style={styles.contentCard}>
           <View style={styles.headerRow}>
             <Text style={styles.categoryBadgeText}>{event.category}</Text>
@@ -121,63 +121,51 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
           <Text style={styles.eventTitle}>{event.title}</Text>
 
-          {/* DATE & TIME INFO */}
-          <View style={styles.infoBlock}>
-            <View style={styles.iconBox}>
-              <Ionicons name="calendar-outline" size={24} color="#34C759" />
+          {/* DYNAMIC HOST ROW */}
+          <View style={styles.creatorRow}>
+            {displayAvatar ? (
+              <Image source={{ uri: displayAvatar }} style={styles.creatorAvatar} />
+            ) : (
+              <Ionicons name={isBusinessEvent ? "briefcase" : "person-circle"} size={44} color="#CBD5E1" />
+            )}
+            <View style={{ marginLeft: 12 }}>
+              <Text style={styles.creatorName}>{displayName}</Text>
+              <Text style={styles.creatorLabel}>{isBusinessEvent ? 'Business Host' : 'Event Organizer'}</Text>
             </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.infoBlock}>
+            <View style={styles.iconBox}><Ionicons name="calendar-outline" size={24} color="#34C759" /></View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>{day}</Text>
               <Text style={styles.infoSubtitle}>{time}</Text>
             </View>
           </View>
 
-          {/* LOCATION INFO */}
           <View style={styles.infoBlock}>
-            <View style={styles.iconBox}>
-              <Ionicons name="location-outline" size={24} color="#34C759" />
-            </View>
+            <View style={styles.iconBox}><Ionicons name="location-outline" size={24} color="#34C759" /></View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>{event.location}</Text>
-              <Text style={styles.infoSubtitle}>Open in Maps</Text>
             </View>
           </View>
 
           <View style={styles.divider} />
 
-          {/* CREATOR INFO */}
-          <View style={styles.creatorRow}>
-            {event.creator?.avatar_url ? (
-              <Image source={{ uri: event.creator.avatar_url }} style={styles.creatorAvatar} />
-            ) : (
-              <Ionicons name="person-circle" size={44} color="#CBD5E1" />
-            )}
-            <View style={{ marginLeft: 12 }}>
-              <Text style={styles.creatorName}>{event.creator?.username || 'Community Member'}</Text>
-              <Text style={styles.creatorLabel}>Event Organizer</Text>
-            </View>
-          </View>
-
-          <View style={styles.divider} />
-
-          {/* ABOUT SECTION */}
           <Text style={styles.sectionTitle}>About this Event</Text>
           <Text style={styles.descriptionText}>{event.description}</Text>
-
         </View>
       </ScrollView>
 
-      {/* FIXED BOTTOM RSVP DOCK */}
       <View style={[styles.bottomDock, { paddingBottom: Math.max(insets.bottom, 20) }]}>
         <View style={styles.attendeesContainer}>
           <Text style={styles.attendeesCount}>{rsvpCount}</Text>
           <Text style={styles.attendeesLabel}>Attending</Text>
         </View>
-
         <TouchableOpacity 
           style={[styles.rsvpButton, isAttending && styles.rsvpButtonActive]}
           onPress={toggleRSVP}
-          activeOpacity={0.8}
         >
           <Text style={[styles.rsvpText, isAttending && styles.rsvpTextActive]}>
             {isAttending ? 'You are going!' : 'RSVP Now'}
@@ -187,6 +175,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
     </View>
   );
 }
+
 
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },

@@ -96,30 +96,59 @@ export default function BusinessScreen({ navigation, route }: any) {
   };
 
   const handleOpenLink = async (url: string) => {
-    const supported = await Linking.canOpenURL(url);
-    if (supported) await Linking.openURL(url);
+    if (!url) return;
+    const formattedUrl = url.startsWith('http') ? url : `https://${url}`;
+    const supported = await Linking.canOpenURL(formattedUrl);
+    if (supported) await Linking.openURL(formattedUrl);
   };
 
   const handleWhatsApp = (phone: string) => {
+    if (!phone) return;
     const cleanPhone = phone.replace(/\D/g, '');
     handleOpenLink(`whatsapp://send?phone=${cleanPhone}`);
   };
 
   async function pickImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.6 });
     if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, logoUri: result.assets[0].uri });
   }
 
   async function pickCoverPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 9], quality: 0.8 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [16, 9], quality: 0.8 });
     if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, coverPhotoUri: result.assets[0].uri });
   }
 
-  async function handleRegisterBusiness() {
+  // --- REGISTRATION VALIDATION ---
+  const validateForm = () => {
     if (!newBiz.name || !newBiz.location) {
       Alert.alert('Missing Info', 'Business name and location are required.');
-      return;
+      return false;
     }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\+?[0-9]{9,15}$/;
+
+    if (newBiz.contact_email && !emailRegex.test(newBiz.contact_email)) {
+      Alert.alert("Invalid Email", "Please enter a valid business email address.");
+      return false;
+    }
+    
+    if (newBiz.whatsapp_number && !phoneRegex.test(newBiz.whatsapp_number.replace(/\s/g, ''))) {
+      Alert.alert("Invalid WhatsApp", "Please enter a valid WhatsApp number (e.g. 0821234567).");
+      return false;
+    }
+    
+    if (newBiz.contact_phone && !phoneRegex.test(newBiz.contact_phone.replace(/\s/g, ''))) {
+      Alert.alert("Invalid Phone", "Please enter a valid phone number.");
+      return false;
+    }
+
+    return true;
+  };
+
+  async function handleRegisterBusiness() {
+    if (!validateForm()) return; // Stop if invalid
+
     try {
       setUploading(true);
       let finalLogoUrl = null;
@@ -231,7 +260,13 @@ export default function BusinessScreen({ navigation, route }: any) {
       activeOpacity={0.9}
       onPress={() => navigation.navigate('BusinessProfile', { business: item, session: session })}
     >
-      <View style={styles.cardHeader}>
+      {/* 1. NEW COVER PHOTO TOP SECTION */}
+      {item.cover_photo_url && (
+         <Image source={{ uri: item.cover_photo_url }} style={styles.cardCoverImage} />
+      )}
+      
+      {/* 2. CARD HEADER OVERLAPPING */}
+      <View style={[styles.cardHeader, item.cover_photo_url && styles.cardHeaderWithCover]}>
         {item.logo_url ? (
           <Image source={{ uri: item.logo_url }} style={styles.bizLogo} />
         ) : (
@@ -264,7 +299,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       </View>
 
       <View style={styles.cardBody}>
-        <Text style={styles.descriptionText}>{item.description}</Text>
+        <Text style={styles.descriptionText} numberOfLines={3}>{item.description}</Text>
         {item.operating_hours && (
           <View style={styles.detailRow}>
             <Ionicons name="time-outline" size={16} color="#34C759" />
@@ -328,7 +363,15 @@ export default function BusinessScreen({ navigation, route }: any) {
         <View style={styles.cardFooter}>
           <TouchableOpacity 
             style={styles.messageButton}
-            onPress={() => navigation.navigate('Chat', { recipientId: item.creator_id, recipientName: item.name, session: session })}
+            onPress={() => navigation.navigate('Inbox', {
+              sellerId: item.creator_id,
+              sellerName: item.name,
+              sellerAvatar: item.logo_url || null,
+              itemId: item.id,          // business id stored as item_id on the message
+              itemTitle: item.name,     // shown as pre-fill text in the chat
+              businessName: item.name,  // shown as the Biz context tag in the list
+              session: session,
+            })}
           >
             <Ionicons name="chatbubbles" size={20} color="#fff" />
             <Text style={styles.messageButtonText}>Chat with Business</Text>
@@ -384,7 +427,11 @@ export default function BusinessScreen({ navigation, route }: any) {
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalContent} keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}>
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
+            style={styles.modalContent} 
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
+          >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Register Business</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
@@ -478,7 +525,7 @@ export default function BusinessScreen({ navigation, route }: any) {
                     )}
                   </View>
                 </View>
-              <Text style={styles.sectionHeader}>Contact</Text>
+              <Text style={styles.sectionHeader}>Contact Details</Text>
               <View style={styles.halfInputRow}>
                 <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.inputLabel}>Phone</Text><TextInput style={styles.inputField} keyboardType="phone-pad" value={newBiz.contact_phone} onChangeText={t => setNewBiz({...newBiz, contact_phone: t})} /></View>
                 <View style={{ flex: 1, marginLeft: 8 }}><Text style={styles.inputLabel}>WhatsApp</Text><TextInput style={styles.inputField} keyboardType="phone-pad" value={newBiz.whatsapp_number} onChangeText={t => setNewBiz({...newBiz, whatsapp_number: t})} /></View>
@@ -499,7 +546,11 @@ export default function BusinessScreen({ navigation, route }: any) {
       <Modal animationType="fade" transparent={true} visible={galleryModalVisible} onRequestClose={() => setGalleryModalVisible(false)}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
+            <KeyboardAvoidingView 
+              behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
+              style={styles.modalContent} 
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
+            >
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Add to Portfolio</Text>
                 <TouchableOpacity onPress={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
@@ -507,7 +558,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               <TouchableOpacity 
                 style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]} 
                 onPress={async () => {
-                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
                   if (!result.canceled) setGalleryImageUri(result.assets[0].uri);
                 }}
               >
@@ -540,15 +591,19 @@ const styles = StyleSheet.create({
   categoryPillActive: { backgroundColor: '#1E293B', borderColor: '#1E293B' },
   categoryPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
   categoryPillTextActive: { color: '#fff' },
+  
   bizCard: { backgroundColor: '#fff', borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  cardCoverImage: { width: '100%', height: 120, resizeMode: 'cover' },
   cardHeader: { flexDirection: 'row', padding: 16, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  bizLogo: { width: 60, height: 60, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#fff' },
-  logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#F1F5F9' },
+  cardHeaderWithCover: { paddingTop: 8 },
+  bizLogo: { width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: '#fff', marginTop: -30 }, // Overlaps the cover if cover exists
+  logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#F1F5F9', marginTop: 0 },
   headerTextContainer: { flex: 1, marginLeft: 16, justifyContent: 'center' },
   categoryBadge: { fontSize: 10, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
   bizName: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
   locationRow: { flexDirection: 'row', alignItems: 'center' },
   locationText: { fontSize: 12, fontWeight: '600', color: '#64748B', marginLeft: 4 },
+  
   cardBody: { padding: 16 },
   descriptionText: { fontSize: 14, color: '#475569', lineHeight: 22, marginBottom: 12 },
   detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: '#F0FDF4', padding: 8, borderRadius: 8, alignSelf: 'flex-start' },
