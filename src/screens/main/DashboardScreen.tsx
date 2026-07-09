@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIn
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from './AppHeader';
 
 function normalizeEvent(events: any) {
@@ -12,10 +13,15 @@ function normalizeEvent(events: any) {
 
 export default function DashboardScreen({ navigation, route }: any) {
   const session = route?.params?.session;
+  const insets = useSafeAreaInsets();
+
+  // Extract display name natively from session
+  const displayName = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Member';
 
   const [followedTopics, setFollowedTopics] = useState<string[]>([]);
   const [loadingForums, setLoadingForums] = useState(true);
   const [featuredEvent, setFeaturedEvent] = useState<any>(null);
+  const [unreadForumCount, setUnreadForumCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
@@ -68,7 +74,23 @@ export default function DashboardScreen({ navigation, route }: any) {
       }
     }
 
-    await Promise.all([fetchFollowedForums(), fetchDashboardEvent()]);
+    async function fetchForumActivityCount() {
+      try {
+        // Look for unread comments/likes to give the hub actual aggregation value
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('receiver_id', session.user.id)
+          .eq('is_read', false)
+          .in('type', ['comment', 'like']);
+          
+        setUnreadForumCount(count || 0);
+      } catch (e: any) {
+        console.error("Forum activity fetch error:", e.message);
+      }
+    }
+
+    await Promise.all([fetchFollowedForums(), fetchDashboardEvent(), fetchForumActivityCount()]);
   }, [session?.user?.id]);
 
   useFocusEffect(
@@ -85,7 +107,7 @@ export default function DashboardScreen({ navigation, route }: any) {
 
   return (
     <View style={styles.mainContainer}>
-      <AppHeader session={session} variant="dashboard" title="Command Center" />
+      <AppHeader session={session} variant="dashboard" title="My Hub" />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -95,7 +117,7 @@ export default function DashboardScreen({ navigation, route }: any) {
         }
       >
         <View style={styles.headerBlock}>
-          <Text style={styles.greetingText}>Welcome back,</Text>
+          <Text style={styles.greetingText}>Welcome back, {displayName}!</Text>
           <Text style={styles.subtitleText}>Here is your workspace overview</Text>
         </View>
 
@@ -125,10 +147,19 @@ export default function DashboardScreen({ navigation, route }: any) {
         {/* --- CARD 2: ACTIVE FORUMS --- */}
         <TouchableOpacity style={styles.dashboardCard} activeOpacity={0.9} onPress={() => navigation.navigate('Main', { screen: 'Forums' })}>
           <View style={[styles.cardBody, { paddingTop: 20 }]}>
+            
             <View style={styles.forumHeaderRow}>
-              <Ionicons name="chatbubbles" size={24} color="#3B82F6" />
-              <Text style={styles.forumMainTitle}>Your Active Forums</Text>
+              <View style={styles.forumHeaderLeft}>
+                <Ionicons name="chatbubbles" size={24} color="#3B82F6" />
+                <Text style={styles.forumMainTitle}>Your Active Forums</Text>
+              </View>
+              {unreadForumCount > 0 && (
+                <View style={styles.badgeContainer}>
+                  <Text style={styles.badgeText}>{unreadForumCount} New</Text>
+                </View>
+              )}
             </View>
+
             <Text style={styles.cardSubtitle}>New activity in your tracked communities.</Text>
 
             {loadingForums ? (
@@ -152,39 +183,34 @@ export default function DashboardScreen({ navigation, route }: any) {
           </View>
         </TouchableOpacity>
 
-        {/* --- CARD 3: BANKING (left as-is, pending stakeholder input) --- */}
+        {/* --- CARD 3: BILLING & PROFILE --- */}
         <TouchableOpacity style={styles.dashboardCard} activeOpacity={0.9} onPress={() => navigation.navigate('Main', { screen: 'Profile' })}>
           <View style={[styles.cardBody, { paddingTop: 20 }]}>
             <View style={styles.forumHeaderRow}>
-              <Ionicons name="wallet" size={24} color="#8B5CF6" />
-              <Text style={styles.forumMainTitle}>Billing & Profile</Text>
-            </View>
-            <View style={styles.bankingInfoBox}>
-              <Ionicons name="card" size={20} color="#475569" />
-              <View style={{ marginLeft: 12 }}>
-                <Text style={styles.bankNameText}>Standard Bank</Text>
-                <Text style={styles.accountMaskText}>Verified •••• 4092</Text>
+              <View style={styles.forumHeaderLeft}>
+                <Ionicons name="card" size={24} color="#8B5CF6" />
+                <Text style={styles.forumMainTitle}>Billing & Account</Text>
               </View>
             </View>
+            <Text style={styles.cardSubtitle}>Manage your billing details, active subscriptions, and profile settings.</Text>
             <View style={styles.cardActionRow}>
-              <Text style={styles.actionText}>Manage Profile</Text>
+              <Text style={styles.actionText}>Manage Account</Text>
               <Ionicons name="arrow-forward" size={16} color="#34C759" />
             </View>
           </View>
         </TouchableOpacity>
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* Floating exit button — mirrors the grid button in the main header,
-          so the same icon means "toggle Dashboard" in both directions. */}
-      <View style={styles.exitButtonContainer} pointerEvents="box-none">
+      {/* Floating exit button — Safe Area applied dynamically */}
+      <View style={[styles.exitButtonContainer, { bottom: Math.max(insets.bottom, 20) + 10 }]} pointerEvents="box-none">
         <TouchableOpacity
           style={styles.exitButton}
           activeOpacity={0.85}
           onPress={() => navigation.navigate('Main', { session })}
         >
-          <Ionicons name="grid" size={24} color="#fff" />
+          <Ionicons name="close" size={28} color="#fff" />
         </TouchableOpacity>
       </View>
     </View>
@@ -195,15 +221,14 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   exitButtonContainer: {
     position: 'absolute',
-    bottom: 28,
     left: 0,
     right: 0,
     alignItems: 'center',
   },
   exitButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: '#34C759',
     justifyContent: 'center',
     alignItems: 'center',
@@ -215,7 +240,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 20 },
   headerBlock: { marginBottom: 20, paddingHorizontal: 4 },
-  greetingText: { fontSize: 28, fontWeight: '800', color: '#1E293B' },
+  greetingText: { fontSize: 26, fontWeight: '800', color: '#1E293B', marginBottom: 4 },
   subtitleText: { fontSize: 16, color: '#64748B', fontWeight: '500' },
   dashboardCard: { backgroundColor: '#fff', borderRadius: 24, marginBottom: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
   cardImageContainer: { height: 140, width: '100%', backgroundColor: '#E2E8F0' },
@@ -226,16 +251,16 @@ const styles = StyleSheet.create({
   cardBody: { padding: 16 },
   cardCategory: { fontSize: 11, fontWeight: '700', color: '#34C759', textTransform: 'uppercase' },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginTop: 4 },
-  cardSubtitle: { fontSize: 14, color: '#64748B', marginTop: 4, marginBottom: 4 },
+  cardSubtitle: { fontSize: 14, color: '#64748B', marginTop: 4, marginBottom: 4, lineHeight: 20 },
   cardActionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
   actionText: { fontSize: 14, fontWeight: '700', color: '#34C759', marginRight: 4 },
-  forumHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  forumHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  forumHeaderLeft: { flexDirection: 'row', alignItems: 'center' },
   forumMainTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginLeft: 8 },
+  badgeContainer: { backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
   tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
   forumTag: { backgroundColor: '#E0F2FE', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#BAE6FD' },
   forumTagText: { fontSize: 12, fontWeight: '700', color: '#0369A1' },
   emptyForumsText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', marginTop: 8, lineHeight: 18 },
-  bankingInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 12, marginTop: 10 },
-  bankNameText: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  accountMaskText: { fontSize: 12, color: '#94A3B8' },
 });

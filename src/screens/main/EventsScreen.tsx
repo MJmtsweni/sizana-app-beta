@@ -16,7 +16,7 @@ export default function EventsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
 
-  const [eventDate, setEventDate] = useState(new Date());
+  const [eventDate, setEventDate] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [eventTime, setEventTime] = useState(new Date());
 
   const [allEvents, setAllEvents] = useState<any[]>([]);
