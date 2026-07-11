@@ -24,19 +24,26 @@ export default function EditBusinessModal({ visible, onClose, business, onUpdate
       quality: 0.7,
     });
 
-    if (result.canceled) return;
+    if (result.canceled || !result.assets[0].uri) return;
 
     setLoading(true);
     try {
       const uri = result.assets[0].uri;
-      const fileName = `${type}-${business.id}-${Date.now()}.jpg`;
+      const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${type}-${business.id}-${Date.now()}.${fileExt}`;
       
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      // CRITICAL FIX: Use FormData instead of fetch().blob() to prevent 0-byte uploads
+      const formData = new FormData();
+      formData.append('file', { 
+        uri: uri, 
+        name: fileName, 
+        type: `image/${fileExt === 'png' ? 'png' : 'jpeg'}` 
+      } as any);
       
       const { error: uploadError } = await supabase.storage
         .from('Listings')
-        .upload(fileName, blob);
+        .upload(fileName, formData);
+
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('Listings').getPublicUrl(fileName);

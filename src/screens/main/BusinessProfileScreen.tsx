@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, 
-  ActivityIndicator, Linking, Alert, Modal
+  ActivityIndicator, Linking, Alert, Modal, KeyboardAvoidingView, Platform, TextInput
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +24,12 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
   const [events, setEvents] = useState<any[]>([]);
   const [loadingContent, setLoadingContent] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // --- REVIEW MODAL STATE ---
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [reviewScore, setReviewScore] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
     checkFollowStatus();
@@ -164,6 +170,68 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
     }
   };
 
+  const handleSubmitReview = async () => {
+    if (reviewScore === 0) {
+      Alert.alert("Missing Rating", "Please select a star rating before submitting.");
+      return;
+    }
+    if (!session?.user?.id) return;
+    
+    // GUARD: Prevent users from reviewing their own businesses
+    if (session.user.id === currentBusiness.creator_id) {
+      Alert.alert("Invalid Action", "You cannot review your own business profile.");
+      return;
+    }
+
+    try {
+      setSubmittingReview(true);
+      
+      // 1. Save the review to the database
+      const { data: reviewData, error } = await supabase
+        .from('user_reviews')
+        .insert({
+          rater_id: session.user.id,
+          ratee_id: currentBusiness.creator_id,
+          score: reviewScore,
+          comment: reviewComment.trim() || null
+        })
+        .select('id') // We request the ID back to confirm successful insertion
+        .single();
+
+      if (error) {
+        if (error.code === '23505') {
+          Alert.alert("Already Reviewed", "You have already left a review for this business owner.");
+        } else {
+          throw error;
+        }
+        return;
+      }
+
+      // 2. Trigger the Notification to the business owner
+      if (reviewData) {
+        const { error: notifError } = await supabase.from('notifications').insert({
+          actor_id: session.user.id,              // The person leaving the review
+          receiver_id: currentBusiness.creator_id, // The business owner getting the review
+          type: 'review',
+          target_id: currentBusiness.id,           // Clicking the notif routes to this business page
+          is_read: false,
+        });
+        
+        if (notifError) console.error("Notification error:", notifError.message);
+      }
+
+      Alert.alert("Success", "Thank you! Your review has been posted.");
+      setReviewModalVisible(false);
+      setReviewScore(0);
+      setReviewComment('');
+      
+    } catch (e: any) {
+      Alert.alert("Error", "Could not submit review: " + e.message);
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   // --- TAB RENDERERS ---
   const renderAboutTab = () => (
     <View style={styles.tabContentContainer}>
@@ -262,7 +330,9 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
     <Text style={styles.actionButtonText}>Message</Text>
   </TouchableOpacity>
             )}
-            
+            <TouchableOpacity style={styles.iconButton} onPress={() => setReviewModalVisible(true)}>
+              <Ionicons name="star" size={20} color="#F59E0B" />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={() => handleWhatsApp(currentBusiness.whatsapp_number)}>
               <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
             </TouchableOpacity>
@@ -328,6 +398,54 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
           {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain" />}
+        </View>
+      </Modal>
+      {/* REVIEW MODAL */}
+      <Modal visible={reviewModalVisible} transparent={true} animationType="slide" onRequestClose={() => setReviewModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Rate this Business</Text>
+              <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
+                <Ionicons name="close-circle" size={28} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 14, color: '#475569', marginBottom: 20, textAlign: 'center' }}>
+              How was your experience with {currentBusiness.name}?
+            </Text>
+
+            {/* Interactive Stars */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 24, gap: 8 }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity key={star} onPress={() => setReviewScore(star)} style={{ padding: 4 }}>
+                  <Ionicons 
+                    name={reviewScore >= star ? "star" : "star-outline"} 
+                    size={40} 
+                    color={reviewScore >= star ? "#F59E0B" : "#CBD5E1"} 
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 }}>Add a comment (Optional)</Text>
+            <TextInput
+              style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: '#1E293B', height: 100, textAlignVertical: 'top', marginBottom: 24 }}
+              placeholder="Tell the community what you loved..."
+              placeholderTextColor="#94A3B8"
+              multiline
+              value={reviewComment}
+              onChangeText={setReviewComment}
+            />
+
+            <TouchableOpacity 
+              style={{ backgroundColor: reviewScore > 0 ? '#34C759' : '#CBD5E1', paddingVertical: 16, borderRadius: 16, alignItems: 'center' }} 
+              onPress={handleSubmitReview}
+              disabled={reviewScore === 0 || submittingReview}
+            >
+              {submittingReview ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Submit Review</Text>}
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
@@ -400,5 +518,33 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center', alignItems: 'center',
+  },
+  // --- MODAL STYLES ---
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(15, 23, 42, 0.5)', // Dark semi-transparent background
+    justifyContent: 'flex-end' 
+  },
+  modalContent: { 
+    backgroundColor: '#fff', 
+    borderTopLeftRadius: 28, 
+    borderTopRightRadius: 28, 
+    padding: 24, 
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  modalHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 16 
+  },
+  modalTitle: { 
+    fontSize: 20, 
+    fontWeight: '800', 
+    color: '#1E293B' 
   },
 });

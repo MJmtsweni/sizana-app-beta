@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import RatingModal from './RatingModal';
 
 const { width, height } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 40) / 2;
@@ -43,6 +44,7 @@ export default function MarketScreen({ route, session: directSession, navigation
 
   const categories = ['All', 'Farming', 'Electronics', 'Vehicles', 'Business', 'Services'];
   const creationCategories = ['Farming', 'Electronics', 'Vehicles', 'Business', 'Services'];
+  const [ratingModalVisible, setRatingModalVisible] = useState(false);
 
   useEffect(() => {
     fetchListings();
@@ -51,13 +53,13 @@ export default function MarketScreen({ route, session: directSession, navigation
   async function fetchListings() {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('market_items')
-        .select(`
-          id, title, description, price, category, image_url, location, created_at, seller_id,
-          users!market_items_seller_id_fkey ( username, avatar_url )
-        `)
-        .order('created_at', { ascending: false });
+       const { data, error } = await supabase
+      .from('market_items')
+      .select(`
+        id, title, description, price, category, image_url, location, created_at, seller_id,
+        users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified )
+      `)
+      .order('created_at', { ascending: false });
 
       if (error) throw error;
       if (data) {
@@ -429,7 +431,14 @@ export default function MarketScreen({ route, session: directSession, navigation
           </KeyboardAvoidingView>
         </View>
       </Modal>
-
+       <RatingModal
+  visible={ratingModalVisible}
+  onClose={() => setRatingModalVisible(false)}
+  raterId={session?.user?.id}
+  rateeId={selectedItem?.seller_id}
+  rateeName={selectedItem?.users?.username || 'this seller'}
+  onSubmitted={fetchListings}
+/>         
       {/* --- HIGH-FIDELITY MARKETPLACE ITEM DETAILS SHEET --- */}
       <Modal animationType="fade" transparent={true} visible={detailsModalVisible} onRequestClose={() => setDetailsModalVisible(false)}>
         <View style={styles.detailsModalOverlay}>
@@ -496,19 +505,44 @@ export default function MarketScreen({ route, session: directSession, navigation
 
                   {/* Seller Profile Segment Row */}
                   <Text style={styles.detailsSectionHeading}>Seller Profile Information</Text>
-                  <View style={styles.sellerProfileLayoutRow}>
-                    <View style={styles.sellerAvatarWrapper}>
-                      {selectedItem.users?.avatar_url ? (
-                        <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
-                      ) : (
-                        <Ionicons name="person-circle" size={44} color="#CBD5E1" />
-                      )}
-                    </View>
-                    <View style={{ marginLeft: 12 }}>
-                      <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
-                      <Text style={styles.sellerTierLabel}>Verified Local Trader</Text>
-                    </View>
-                  </View>
+<View style={styles.sellerProfileLayoutRow}>
+  <View style={styles.sellerAvatarWrapper}>
+    {selectedItem.users?.avatar_url ? (
+      <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
+    ) : (
+      <Ionicons name="person-circle" size={44} color="#CBD5E1" />
+    )}
+  </View>
+  <View style={{ marginLeft: 12, flex: 1 }}>
+    <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+      {selectedItem.users?.rating != null ? (
+        <Text style={styles.sellerTierLabel}>⭐ {Number(selectedItem.users.rating).toFixed(1)}</Text>
+      ) : (
+        <Text style={styles.sellerTierLabelMuted}>New Member</Text>
+      )}
+      {selectedItem.users?.is_verified && (
+        <Text style={[styles.sellerTierLabel, { marginLeft: 8 }]}>✓ Verified</Text>
+      )}
+    </View>
+    {selectedItem.seller_id !== session?.user?.id && (
+  <TouchableOpacity 
+    style={{ marginTop: 4 }}
+    onPress={() => {
+      // 1. Close the product details sheet
+      setDetailsModalVisible(false); 
+      
+      // 2. Wait for the slide-down animation, then trigger the rating modal
+      setTimeout(() => {
+        setRatingModalVisible(true);
+      }, 350); 
+    }} 
+  >
+    <Text style={styles.rateSellerLink}>Rate this seller</Text>
+  </TouchableOpacity>
+)}
+  </View>
+</View>
 
                   {/* 3. TRANSACTION ACTION CTA BUTTON
                       Hidden when viewing your own listing — use the ellipsis to manage instead */}
@@ -601,5 +635,7 @@ const styles = StyleSheet.create({
   sellerNameLabel: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   sellerTierLabel: { fontSize: 12, fontWeight: '600', color: '#34C759', marginTop: 1 },
   messageSellerActionButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 32, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 3 },
-  messageSellerButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' }
+  messageSellerButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  sellerTierLabelMuted: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
+rateSellerLink: { fontSize: 12, fontWeight: '700', color: '#3B82F6', marginTop: 4 },
 });

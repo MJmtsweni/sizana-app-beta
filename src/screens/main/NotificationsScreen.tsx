@@ -133,6 +133,28 @@ export default function NotificationsScreen({ navigation, route }: any) {
         if (eventData) {
           navigation.navigate('EventDetail', { event: eventData, session });
         }
+      } else if (item.type === 'review') {
+        // Fetch the business the review was left on so we can pass it to the profile screen
+        const { data: bizData } = await supabase
+          .from('businesses')
+          .select('*')
+          .eq('id', item.target_id)
+          .single();
+          
+        if (bizData) {
+          navigation.navigate('BusinessProfile', { business: bizData, session });
+        }
+      } else if (item.type === 'seller_review') {
+        // Route to Public User Profile
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', item.target_id)
+          .single();
+          
+        if (userData) {
+          navigation.navigate('PublicProfile', { userProfile: userData, session });
+        }
       }
     } catch (e: any) {
       Alert.alert('Content Unavailable', 'This content may have been deleted.');
@@ -188,6 +210,18 @@ export default function NotificationsScreen({ navigation, route }: any) {
           badgeColor: '#34C759',
           message: 'sent a new business inquiry.',
         };  
+        case 'review':
+        return {
+          icon: 'star' as const,
+          badgeColor: '#F59E0B',
+          message: 'left a review on your business.',
+        };
+        case 'seller_review':
+        return {
+          icon: 'pricetag' as const,
+          badgeColor: '#F97316',
+          message: 'rated you as a marketplace seller.',
+        };
       default:
         return {
           icon: 'notifications' as const,

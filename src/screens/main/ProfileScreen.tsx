@@ -34,6 +34,8 @@ export default function ProfileScreen({ route, navigation }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAnim = useRef(new Animated.Value(0)).current;
 
+  
+
   useFocusEffect(
     useCallback(() => {
       fetchUserData();
@@ -130,10 +132,10 @@ export default function ProfileScreen({ route, navigation }: any) {
         
         formData.append('file', { uri: editAvatarUri, name: fileName, type: `image/${fileExt}` } as any);
         
-        const { error: uploadError } = await supabase.storage.from('Avatars').upload(fileName, formData);
+        const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, formData);
         if (uploadError) throw uploadError;
 
-        const { data: { publicUrl } } = supabase.storage.from('Avatars').getPublicUrl(fileName);
+        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
         finalAvatarUrl = publicUrl;
       }
 
