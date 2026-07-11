@@ -88,8 +88,8 @@ export default function EventsScreen({ navigation, route }: any) {
         .from('events')
         .select(`
           *,
-          creator:creator_id ( username, avatar_url ),
-          business:business_id ( name, logo_url ),
+          creator:creator_id ( * ),
+          business:business_id ( * ),
           rsvps:event_rsvps ( user_id )
         `)
         .order('event_date', { ascending: true });
@@ -148,9 +148,7 @@ export default function EventsScreen({ navigation, route }: any) {
     setSearchDate('');
   };
 
-  // Now accepts the full event object so we can read creator_id for the notification
   const toggleRSVP = async (event: any, currentlyAttending: boolean) => {
-    // Optimistic UI update
     setAllEvents(prev => prev.map(e => {
       if (e.id === event.id) {
         return {
@@ -163,7 +161,6 @@ export default function EventsScreen({ navigation, route }: any) {
     }));
 
     if (currentlyAttending) {
-      // Un-RSVP — just delete the record, no notification needed
       const { error } = await supabase
         .from('event_rsvps')
         .delete()
@@ -171,33 +168,29 @@ export default function EventsScreen({ navigation, route }: any) {
 
       if (error) {
         console.error('RSVP delete error:', error.message);
-        // Revert on failure
         setAllEvents(prev => prev.map(e =>
           e.id === event.id ? { ...e, isAttending: true, rsvpCount: e.rsvpCount + 1 } : e
         ));
       }
     } else {
-      // RSVP
       const { error: rsvpError } = await supabase
         .from('event_rsvps')
         .insert({ event_id: event.id, user_id: session.user.id });
 
       if (rsvpError) {
         console.error('RSVP insert error:', rsvpError.message);
-        // Revert on failure
         setAllEvents(prev => prev.map(e =>
           e.id === event.id ? { ...e, isAttending: false, rsvpCount: e.rsvpCount - 1 } : e
         ));
         return;
       }
 
-      // Notify the event creator — skip if the user is the creator
       if (event.creator_id && event.creator_id !== session.user.id) {
         const { error: notifError } = await supabase.from('notifications').insert({
-          actor_id: session.user.id,    // Who RSVP'd
-          receiver_id: event.creator_id, // Event creator gets notified
+          actor_id: session.user.id,    
+          receiver_id: event.creator_id, 
           type: 'rsvp',
-          target_id: event.id,           // So we can navigate to the event later
+          target_id: event.id,           
           is_read: false,
         });
         if (notifError) console.error('RSVP notification error:', notifError.message);
@@ -290,6 +283,18 @@ export default function EventsScreen({ navigation, route }: any) {
     }
   }
 
+  const handleProfilePress = (item: any) => {
+    if (item.business_id && item.business) {
+      navigation.navigate('BusinessProfile', { business: item.business, session });
+    } else if (item.creator_id && item.creator) {
+      if (item.creator_id === session?.user?.id) {
+        navigation.navigate('Profile', { session });
+      } else {
+        navigation.navigate('PublicProfile', { userProfile: item.creator, session });
+      }
+    }
+  };
+
   const formatEventDate = (isoString: string) => {
     const d = new Date(isoString);
     const day = d.toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -304,13 +309,16 @@ export default function EventsScreen({ navigation, route }: any) {
     
     return (
       <View style={styles.eventCard}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.eventBanner} />
-        ) : (
-          <View style={[styles.eventBanner, styles.placeholderBanner]}>
-            <Ionicons name="calendar" size={40} color="#94A3B8" />
-          </View>
-        )}
+        {/* Wrapping Image in TouchableOpacity to go to EventDetail */}
+        <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('EventDetail', { event: item, session })}>
+          {item.image_url ? (
+            <Image source={{ uri: item.image_url }} style={styles.eventBanner} />
+          ) : (
+            <View style={[styles.eventBanner, styles.placeholderBanner]}>
+              <Ionicons name="calendar" size={40} color="#94A3B8" />
+            </View>
+          )}
+        </TouchableOpacity>
         
         <View style={styles.dateBadge}>
           <Text style={styles.dateBadgeMonth}>{new Date(item.event_date).toLocaleDateString('en-ZA', { month: 'short' }).toUpperCase()}</Text>
@@ -328,16 +336,23 @@ export default function EventsScreen({ navigation, route }: any) {
             )}
           </View>
 
-          <View style={styles.hostRow}>
+          {/* DYNAMIC HOST ROW WITH ROUTING */}
+          <TouchableOpacity 
+            style={styles.hostRow}
+            activeOpacity={0.7}
+            onPress={() => handleProfilePress(item)}
+          >
             {displayAvatar ? (
               <Image source={{ uri: displayAvatar }} style={styles.hostAvatar} />
             ) : (
               <Ionicons name={item.business ? "briefcase" : "person-circle"} size={20} color="#CBD5E1" style={{ marginRight: 6 }} />
             )}
             <Text style={styles.hostName}>Hosted by {displayName}</Text>
-          </View>
+          </TouchableOpacity>
 
-          <Text style={styles.eventTitle}>{item.title}</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('EventDetail', { event: item, session })}>
+            <Text style={styles.eventTitle}>{item.title}</Text>
+          </TouchableOpacity>
           
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={16} color="#64748B" />
@@ -364,7 +379,6 @@ export default function EventsScreen({ navigation, route }: any) {
                 </TouchableOpacity>
               )}
               
-              {/* Pass the full item object, not just item.id */}
               <TouchableOpacity 
                 style={[styles.rsvpButton, item.isAttending && styles.rsvpButtonActive]}
                 onPress={() => toggleRSVP(item, item.isAttending)}

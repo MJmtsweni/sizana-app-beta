@@ -10,6 +10,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
+const INTEREST_CATEGORIES = [
+  'Parties & Celebrations', 'Weddings', 'Music & Concerts', 'Arts & Entertainment', 
+  'Sports & Fitness', 'Business & Networking', 'Education & Learning', 'Technology & Gaming', 
+  'Food & Drink', 'Markets & Shopping', 'Community & Charity', 'Religious & Spiritual', 
+  'Family & Kids', 'Cultural & Heritage', 'Health & Wellness', 'Outdoor & Nature', 
+  'Automotive', 'Pets & Animals', 'Private Events', 'Online & Virtual', 
+  'Government & Public Services', 'Other'
+];
+
+const SA_REGIONS = {
+  "Gauteng": ["Johannesburg", "Pretoria", "Centurion", "Midrand"],
+  "North West": ["Vryburg", "Taung", "Potchefstroom", "Klerksdorp", "Mahikeng", "Rustenburg"],
+  "Western Cape": ["Cape Town", "Stellenbosch", "George", "Paarl"],
+  "KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"],
+  "Free State": ["Bloemfontein", "Welkom"],
+  "Eastern Cape": ["Gqeberha", "East London", "Mthatha"],
+  "Limpopo": ["Polokwane", "Tzaneen"],
+  "Mpumalanga": ["Nelspruit", "Witbank"],
+  "Northern Cape": ["Kimberley", "Upington"]
+};
+
 export default function ProfileScreen({ route, navigation }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
@@ -17,9 +38,10 @@ export default function ProfileScreen({ route, navigation }: any) {
   const [profile, setProfile] = useState<any>(null);
   const [userPosts, setUserPosts] = useState<any[]>([]);
   const [userEvents, setUserEvents] = useState<any[]>([]);
+  const [userListings, setUserListings] = useState<any[]>([]);
+  const [userReviews, setUserReviews] = useState<any[]>([]); // NEW: State for reviews
   const [activeTab, setActiveTab] = useState('Posts');
   const [loading, setLoading] = useState(true);
-  const [userListings, setUserListings] = useState<any[]>([]);
 
   // Edit Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -27,14 +49,14 @@ export default function ProfileScreen({ route, navigation }: any) {
   const [editBio, setEditBio] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editAvatarUri, setEditAvatarUri] = useState<string | null>(null);
+  const [editRegions, setEditRegions] = useState<string[]>([]);
+  const [editInterests, setEditInterests] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [userBusinesses, setUserBusinesses] = useState<any[]>([]);
 
   // Create FAB State
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAnim = useRef(new Animated.Value(0)).current;
-
-  
 
   useFocusEffect(
     useCallback(() => {
@@ -60,6 +82,8 @@ export default function ProfileScreen({ route, navigation }: any) {
         setEditBio(profileData.bio || '');
         setEditLocation(profileData.location || '');
         setEditAvatarUri(profileData.avatar_url || null);
+        setEditRegions(profileData.regions || []);
+        setEditInterests(profileData.interests || []);
       }
 
       const { data: postsData } = await supabase
@@ -81,13 +105,7 @@ export default function ProfileScreen({ route, navigation }: any) {
         setUserEvents(eventsData.map((e: any) => e.events));
       }
 
-    } catch (error: any) {
-      console.error("Profile fetch error:", error.message);
-    } finally {
-      setLoading(false);
-    }
-
-    // Fetch User's Businesses
+      // Fetch User's Businesses
       const { data: bizData } = await supabase
         .from('business_roles')
         .select('businesses(*)')
@@ -99,11 +117,26 @@ export default function ProfileScreen({ route, navigation }: any) {
       }
 
       const { data: marketData } = await supabase
-        .from('buy_and_sell') // Update if your table has a different name
+        .from('market_items') 
         .select('*')
-        .eq('seller_id', session.user.id); // Update if your column is named 'author_id'
+        .eq('seller_id', session.user.id); 
       
       if (marketData) setUserListings(marketData);
+
+      // --- NEW: Fetch User's Received Reviews ---
+      const { data: reviewsData } = await supabase
+        .from('user_reviews')
+        .select('*, rater:rater_id(username, avatar_url)')
+        .eq('ratee_id', session.user.id)
+        .order('created_at', { ascending: false });
+
+      if (reviewsData) setUserReviews(reviewsData);
+
+    } catch (error: any) {
+      console.error("Profile fetch error:", error.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function pickImage() {
@@ -117,6 +150,27 @@ export default function ProfileScreen({ route, navigation }: any) {
       setEditAvatarUri(result.assets[0].uri);
     }
   }
+
+  const toggleEditRegion = (city: string) => {
+    if (editRegions.includes(city)) {
+      setEditRegions(prev => prev.filter(r => r !== city));
+    } else {
+      if (editRegions.length >= 3) {
+        Alert.alert("Limit Reached", "You can only select up to 3 regions of interest.");
+        return;
+      }
+      setEditRegions(prev => [...prev, city]);
+    }
+  };
+
+  const toggleEditInterest = (topic: string) => {
+    if (editInterests.includes(topic)) {
+      setEditInterests(prev => prev.filter(t => t !== topic));
+    } else {
+      setEditInterests(prev => [...prev, topic]);
+    }
+  };
+
 
   async function handleSaveProfile() {
     try {
@@ -145,7 +199,9 @@ export default function ProfileScreen({ route, navigation }: any) {
           username: editUsername,
           bio: editBio,
           location: editLocation,
-          avatar_url: finalAvatarUrl
+          avatar_url: finalAvatarUrl,
+          regions: editRegions,
+          interests: editInterests,
         })
         .eq('id', session.user.id);
 
@@ -253,6 +309,38 @@ export default function ProfileScreen({ route, navigation }: any) {
     );
   };
 
+  // --- NEW: Review Item Renderer ---
+  const renderReviewItem = ({ item }: { item: any }) => (
+    <View style={styles.reviewCard}>
+      <View style={styles.reviewHeader}>
+        <View style={styles.raterInfo}>
+          {item.rater?.avatar_url ? (
+            <Image source={{ uri: item.rater.avatar_url }} style={styles.raterAvatar} />
+          ) : (
+            <Ionicons name="person-circle" size={36} color="#CBD5E1" />
+          )}
+          <View style={{ marginLeft: 10 }}>
+            <Text style={styles.raterName}>{item.rater?.username || 'Community Member'}</Text>
+            <Text style={styles.reviewDate}>{formatTime(item.created_at)}</Text>
+          </View>
+        </View>
+        <View style={styles.starsRow}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <Ionicons
+              key={star}
+              name={item.score >= star ? "star" : "star-outline"}
+              size={14}
+              color={item.score >= star ? "#F59E0B" : "#CBD5E1"}
+            />
+          ))}
+        </View>
+      </View>
+      {item.comment && (
+        <Text style={styles.reviewComment}>{item.comment}</Text>
+      )}
+    </View>
+  );
+
   if (loading && !profile) {
     return <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>;
   }
@@ -273,9 +361,20 @@ export default function ProfileScreen({ route, navigation }: any) {
       <View style={[styles.headerBackground, { paddingTop: Math.max(insets.top, 45) }]}>
         <View style={styles.headerTopRow}>
           <Text style={styles.headerTitle}>Profile</Text>
-          <TouchableOpacity onPress={handleOpenSettings} style={{ padding: 4 }}>
-            <Ionicons name="settings-outline" size={24} color="#64748B" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {/* NEW: Friends/Network Button */}
+            <TouchableOpacity 
+              onPress={() => navigation.navigate('Friends', { session })} 
+              style={{ padding: 4, marginRight: 12 }}
+            >
+              <Ionicons name="people-outline" size={26} color="#1E293B" />
+            </TouchableOpacity>
+            
+            {/* EXISTING: Settings Button */}
+            <TouchableOpacity onPress={handleOpenSettings} style={{ padding: 4 }}>
+              <Ionicons name="settings-outline" size={24} color="#64748B" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.profileInfoContainer}>
@@ -337,7 +436,8 @@ export default function ProfileScreen({ route, navigation }: any) {
         style={styles.tabContainer}
         contentContainerStyle={styles.tabContentRow}
       >
-        {['Posts', 'My RSVPs', 'Businesses', 'Shop'].map(tab => {
+        {/* Added 'Reviews' to the array */}
+        {['Posts', 'My RSVPs', 'Businesses', 'Shop', 'Reviews'].map(tab => {
           const active = activeTab === tab;
           return (
             <TouchableOpacity 
@@ -441,6 +541,23 @@ export default function ProfileScreen({ route, navigation }: any) {
         />
       )}
 
+      {/* --- NEW REVIEWS TAB --- */}
+      {activeTab === 'Reviews' && (
+        <FlatList 
+          data={userReviews} 
+          keyExtractor={(item) => item.id} 
+          renderItem={renderReviewItem}
+          contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyLayout}>
+              <Ionicons name="star-outline" size={48} color="#CBD5E1" />
+              <Text style={styles.emptyText}>You haven't received any reviews yet.</Text>
+            </View>
+          }
+        />
+      )}
+
       {/* --- CREATE FAB + BLOSSOM MENU --- */}
       {menuOpen && (
         <Pressable style={StyleSheet.absoluteFill} onPress={toggleCreateMenu}>
@@ -522,7 +639,7 @@ export default function ProfileScreen({ route, navigation }: any) {
               <Text style={styles.inputLabel}>Username</Text>
               <TextInput style={styles.inputField} value={editUsername} onChangeText={setEditUsername} placeholder="Your display name" />
               
-              <Text style={styles.inputLabel}>Location</Text>
+              <Text style={styles.inputLabel}>Primary Location</Text>
               <TextInput style={styles.inputField} value={editLocation} onChangeText={setEditLocation} placeholder="e.g. Schweizer-Reneke, NW" />
 
               <Text style={styles.inputLabel}>Bio</Text>
@@ -533,6 +650,55 @@ export default function ProfileScreen({ route, navigation }: any) {
                 onChangeText={setEditBio} 
                 placeholder="e.g. Founder | Tech Enthusiast" 
               />
+
+              {/* --- REGIONS OF INTEREST --- */}
+              <View style={{ marginTop: 8, marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={styles.inputLabel}>Regions of Interest</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#3B82F6' }}>{editRegions.length} / 3</Text>
+                </View>
+                
+                {Object.entries(SA_REGIONS).map(([province, cities]) => (
+                  <View key={province} style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 8 }}>{province}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                      {cities.map((city) => {
+                        const isActive = editRegions.includes(city);
+                        return (
+                          <TouchableOpacity 
+                            key={city} 
+                            style={[styles.pill, isActive && styles.pillActive]}
+                            onPress={() => toggleEditRegion(city)}
+                          >
+                            <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{city}</Text>
+                            {isActive && <Ionicons name="close" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* --- TOPICS OF INTEREST --- */}
+              <View style={{ marginBottom: 24 }}>
+                <Text style={[styles.inputLabel, { marginBottom: 12 }]}>Topics of Interest</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                  {INTEREST_CATEGORIES.map((topic) => {
+                    const isActive = editInterests.includes(topic);
+                    return (
+                      <TouchableOpacity 
+                        key={topic} 
+                        style={[styles.pill, isActive && styles.pillActive]}
+                        onPress={() => toggleEditInterest(topic)}
+                      >
+                        <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{topic}</Text>
+                        {isActive && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
 
               <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile} disabled={saving}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
@@ -610,6 +776,20 @@ const styles = StyleSheet.create({
   eventDateBox: { backgroundColor: '#F0FDF4', padding: 10, borderRadius: 12, alignItems: 'center', justifyContent: 'center', minWidth: 60 },
   eventDateText: { fontSize: 12, fontWeight: '800', color: '#34C759', textAlign: 'center' },
 
+  // --- NEW REVIEW STYLES ---
+  reviewCard: {
+    backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: '#E2E8F0',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 2,
+  },
+  reviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  raterInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  raterAvatar: { width: 36, height: 36, borderRadius: 18 },
+  raterName: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
+  reviewDate: { fontSize: 12, color: '#94A3B8', marginTop: 2, fontWeight: '500' },
+  starsRow: { flexDirection: 'row', marginTop: 2 },
+  reviewComment: { fontSize: 14, color: '#475569', marginTop: 8, lineHeight: 22 },
+
   emptyLayout: { alignItems: 'center', marginTop: 60 },
   emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 },
 
@@ -645,5 +825,9 @@ const styles = StyleSheet.create({
   inputField: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: '#1E293B', marginBottom: 16 },
   
   saveButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
-  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' }
+  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: '#E2E8F0' },
+  pillActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
+  pillText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  pillTextActive: { color: '#fff' }
 });

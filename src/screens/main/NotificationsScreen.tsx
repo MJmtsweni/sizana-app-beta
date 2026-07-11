@@ -94,11 +94,10 @@ export default function NotificationsScreen({ navigation, route }: any) {
       }
 
       // 2. Navigate based on type
-      if (item.type === 'like' || item.type === 'comment') {
-        // Navigate to the forum thread
+      if (item.type === 'like' || item.type === 'comment' || item.type === 'network_post') {
         const { data: postData, error } = await supabase
           .from('forum_posts')
-          .select(`*, author:author_id(username, avatar_url)`)
+          .select(`*, author:author_id(*), business:business_id(*)`)
           .eq('id', item.target_id)
           .single();
 
@@ -106,8 +105,29 @@ export default function NotificationsScreen({ navigation, route }: any) {
         if (postData) {
           navigation.navigate('Thread', { post: postData, session });
         }
+      } else if (item.type === 'rsvp' || item.type === 'network_event') {
+        const { data: eventData, error } = await supabase
+          .from('events')
+          .select(`*, creator:creator_id(*), business:business_id(*)`)
+          .eq('id', item.target_id)
+          .single();
+
+        if (error) throw error;
+        if (eventData) {
+          navigation.navigate('EventDetail', { event: eventData, session });
+        }
+      } else if (item.type === 'network_market') {
+        // Route to the seller's public profile to view their listings
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', item.actor_id)
+          .single();
+          
+        if (userData) {
+          navigation.navigate('PublicProfile', { userProfile: userData, session });
+        }
       } else if (item.type === 'follow') {
-        // Fetch the business they followed to route them there
         const { data: bizData } = await supabase
           .from('businesses')
           .select('*')
@@ -118,23 +138,8 @@ export default function NotificationsScreen({ navigation, route }: any) {
           navigation.navigate('BusinessProfile', { business: bizData, session });
         }
       } else if (item.type === 'message') {
-        // Route them directly to their Inbox to see the new inquiry
         navigation.navigate('Inbox', { session });
-  
-      } else if (item.type === 'rsvp') {
-        // Navigate to the event detail — target_id is event_id
-        const { data: eventData, error } = await supabase
-          .from('events')
-          .select(`*, creator:creator_id(username, avatar_url), business:business_id(name, logo_url)`)
-          .eq('id', item.target_id)
-          .single();
-
-        if (error) throw error;
-        if (eventData) {
-          navigation.navigate('EventDetail', { event: eventData, session });
-        }
       } else if (item.type === 'review') {
-        // Fetch the business the review was left on so we can pass it to the profile screen
         const { data: bizData } = await supabase
           .from('businesses')
           .select('*')
@@ -145,11 +150,23 @@ export default function NotificationsScreen({ navigation, route }: any) {
           navigation.navigate('BusinessProfile', { business: bizData, session });
         }
       } else if (item.type === 'seller_review') {
-        // Route to Public User Profile
         const { data: userData } = await supabase
           .from('users')
           .select('*')
           .eq('id', item.target_id)
+          .single();
+          
+        if (userData) {
+          navigation.navigate('PublicProfile', { userProfile: userData, session });
+        }
+      } else if (item.type === 'friend_request') {
+        // Route directly to the new Friends management screen
+        navigation.navigate('Friends', { session });
+      } else if (['user_follow', 'friend_accept'].includes(item.type)) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', item.actor_id) 
           .single();
           
         if (userData) {
@@ -180,54 +197,21 @@ export default function NotificationsScreen({ navigation, route }: any) {
   // Config map for all supported notification types
   const getTypeConfig = (type: string, actorName: string) => {
     switch (type) {
-      case 'like':
-        return {
-          icon: 'heart' as const,
-          badgeColor: '#EF4444',
-          message: 'liked your post.',
-        };
-      case 'comment':
-        return {
-          icon: 'chatbubble' as const,
-          badgeColor: '#3B82F6',
-          message: 'commented on your discussion.',
-        };
-      case 'follow':
-        return {
-          icon: 'person-add' as const,
-          badgeColor: '#8B5CF6',
-          message: 'started following your business.',
-        };
-      case 'rsvp':
-        return {
-          icon: 'calendar' as const,
-          badgeColor: '#F59E0B',
-          message: 'is attending your event.',
-        };
-      case 'message':
-        return {
-          icon: 'chatbubble-ellipses' as const,
-          badgeColor: '#34C759',
-          message: 'sent a new business inquiry.',
-        };  
-        case 'review':
-        return {
-          icon: 'star' as const,
-          badgeColor: '#F59E0B',
-          message: 'left a review on your business.',
-        };
-        case 'seller_review':
-        return {
-          icon: 'pricetag' as const,
-          badgeColor: '#F97316',
-          message: 'rated you as a marketplace seller.',
-        };
-      default:
-        return {
-          icon: 'notifications' as const,
-          badgeColor: '#64748B',
-          message: 'has new activity.',
-        };
+      case 'like': return { icon: 'heart' as const, badgeColor: '#EF4444', message: 'liked your post.' };
+      case 'comment': return { icon: 'chatbubble' as const, badgeColor: '#3B82F6', message: 'commented on your discussion.' };
+      case 'follow': return { icon: 'person-add' as const, badgeColor: '#8B5CF6', message: 'started following your business.' };
+      case 'rsvp': return { icon: 'calendar' as const, badgeColor: '#F59E0B', message: 'is attending your event.' };
+      case 'message': return { icon: 'chatbubble-ellipses' as const, badgeColor: '#34C759', message: 'sent a new business inquiry.' };  
+      case 'review': return { icon: 'star' as const, badgeColor: '#F59E0B', message: 'left a review on your business.' };
+      case 'seller_review': return { icon: 'pricetag' as const, badgeColor: '#F97316', message: 'rated you as a marketplace seller.' };
+      case 'user_follow': return { icon: 'person-add' as const, badgeColor: '#8B5CF6', message: 'started following you.' };
+      case 'friend_request': return { icon: 'people' as const, badgeColor: '#3B82F6', message: 'sent you a friend request.' };
+      case 'friend_accept': return { icon: 'checkmark-circle' as const, badgeColor: '#34C759', message: 'accepted your friend request.' };
+      // Broadcast Types:
+      case 'network_post': return { icon: 'chatbubbles' as const, badgeColor: '#3B82F6', message: 'published a new forum post.' };
+      case 'network_event': return { icon: 'calendar' as const, badgeColor: '#EF4444', message: 'created a new event.' };
+      case 'network_market': return { icon: 'pricetag' as const, badgeColor: '#10B981', message: 'listed a new marketplace item.' };
+      default: return { icon: 'notifications' as const, badgeColor: '#64748B', message: 'has new activity.' };
     }
   };
 

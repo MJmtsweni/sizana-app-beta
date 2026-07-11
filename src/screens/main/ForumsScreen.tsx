@@ -27,7 +27,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newTopic, setNewTopic] = useState('General Discussion');
+  const [newTopic, setNewTopic] = useState('Parties & Celebrations');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -36,7 +36,14 @@ export default function ForumsScreen({ navigation, route, session: directSession
   // Edit mode 
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
 
-  const topics = ['General Discussion', 'Farming & Agriculture', 'Tech & IT', 'Vehicles', 'Local News'];
+  const topics = [
+    'Parties & Celebrations', 'Weddings', 'Music & Concerts', 'Arts & Entertainment', 
+    'Sports & Fitness', 'Business & Networking', 'Education & Learning', 'Technology & Gaming', 
+    'Food & Drink', 'Markets & Shopping', 'Community & Charity', 'Religious & Spiritual', 
+    'Family & Kids', 'Cultural & Heritage', 'Health & Wellness', 'Outdoor & Nature', 
+    'Automotive', 'Pets & Animals', 'Private Events', 'Online & Virtual', 
+    'Government & Public Services', 'Other'
+  ];
 
   useFocusEffect(
     useCallback(() => {
@@ -52,8 +59,8 @@ export default function ForumsScreen({ navigation, route, session: directSession
         .from('forum_posts')
         .select(`
           *,
-          author:author_id ( username, avatar_url ),
-          business:business_id ( name, logo_url ),
+          author:author_id ( * ),
+          business:business_id ( * ),
           likes:forum_likes ( user_id ),
           follows:forum_follows ( user_id ),
           comments:forum_comments ( id )
@@ -110,25 +117,21 @@ export default function ForumsScreen({ navigation, route, session: directSession
     }
   };
 
-  // Now accepts the full post object so we can read author_id for the notification
   const toggleFollow = async (post: any, currentlyFollowing: boolean) => {
     // Optimistic update
     setPosts(prev => prev.map(p => p.id === post.id ? { ...p, isFollowing: !currentlyFollowing } : p));
 
     if (currentlyFollowing) {
-      // Unfollow — just delete the record, no notification needed
       await supabase.from('forum_follows').delete().match({ post_id: post.id, user_id: session.user.id });
     } else {
-      // Follow
       await supabase.from('forum_follows').insert({ post_id: post.id, user_id: session.user.id });
 
-      // Notify the post author — skip if the user is following their own post
       if (post.author_id && post.author_id !== session.user.id) {
         const { error: notifError } = await supabase.from('notifications').insert({
-          actor_id: session.user.id,    // Who followed
-          receiver_id: post.author_id,  // Post author gets notified
+          actor_id: session.user.id,    
+          receiver_id: post.author_id,  
           type: 'follow',
-          target_id: post.id,           // So we can navigate to the post later
+          target_id: post.id,           
           is_read: false,
         });
         if (notifError) console.error('Forum follow notification error:', notifError.message);
@@ -204,12 +207,24 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
   const clearForm = () => {
     setNewTitle(''); setNewContent(''); setMediaUri(null); setMediaType(null);
-    setNewTopic('General Discussion'); setDisableComments(false);
+    setNewTopic('Parties & Celebrations'); setDisableComments(false);
     setEditingPostId(null); setPostingAsBusinessId(null);
   };
 
   const handleShare = async (title: string, topic: string) => {
     try { await Share.share({ message: `Check out: "${title}" in the ${topic} forum!` }); } catch (e: any) { console.error(e); }
+  };
+
+  const handleProfilePress = (item: any) => {
+    if (item.business_id && item.business) {
+      navigation.navigate('BusinessProfile', { business: item.business, session });
+    } else if (item.author_id) {
+      if (item.author_id === session?.user?.id) {
+        navigation.navigate('Profile', { session });
+      } else {
+        navigation.navigate('PublicProfile', { userProfile: item.author, session });
+      }
+    }
   };
 
   const renderPostCard = ({ item }: { item: any }) => {
@@ -220,7 +235,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
       <View style={styles.postCard}>
         {/* HEADER */}
         <View style={styles.postHeader}>
-          <View style={styles.authorRow}>
+          <TouchableOpacity 
+            style={styles.authorRow} 
+            activeOpacity={0.7} 
+            onPress={() => handleProfilePress(item)}
+          >
             {displayAvatar ? (
               <Image source={{ uri: displayAvatar }} style={styles.avatarImage} />
             ) : (
@@ -232,7 +251,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
                 <Text style={styles.postTopicBadge}>{item.topic}</Text>
               </View>
             </View>
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.headerActions}>
             {/* Follow Button */}

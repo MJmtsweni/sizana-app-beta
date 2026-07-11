@@ -37,7 +37,7 @@ export default function ThreadScreen({ route, navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null); // Track comment edits
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
@@ -49,15 +49,14 @@ export default function ThreadScreen({ route, navigation }: any) {
             .from('forum_posts')
             .select(`
               *,
-              author:author_id ( username, avatar_url )
+              author:author_id ( * ),
+              business:business_id ( * )
             `)
             .eq('id', currentPost.id)
             .single();
             
           if (error) throw error;
           if (data) {
-            // DIAGNOSTIC LOG: Check your terminal/Metro bundler console to see this output!
-            console.log(`[Sizana Debug] Post Lock Status for "${data.title}":`, data.comments_disabled);
             setCurrentPost(data); 
           }
         } catch (error) {
@@ -80,7 +79,7 @@ export default function ThreadScreen({ route, navigation }: any) {
         .from('forum_comments')
         .select(`
           *,
-          author:author_id ( username, avatar_url ),
+          author:author_id ( * ),
           likes:forum_comment_likes ( user_id )
         `)
         .eq('post_id', currentPost.id)
@@ -154,15 +153,25 @@ export default function ThreadScreen({ route, navigation }: any) {
     setSubmitting(true);
 
     try {
-      const { error } = await supabase
-        .from('forum_comments')
-        .insert({
-          post_id: currentPost.id,
-          author_id: session.user.id,
-          content: finalContent
-        });
+      if (editingCommentId) {
+        const { error } = await supabase
+          .from('forum_comments')
+          .update({ content: finalContent })
+          .eq('id', editingCommentId)
+          .eq('author_id', session.user.id);
+        
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('forum_comments')
+          .insert({
+            post_id: currentPost.id,
+            author_id: session.user.id,
+            content: finalContent
+          });
 
-      if (error) throw error;
+        if (error) throw error;
+      }
       
       setReplyingTo(null);
       setEditingCommentId(null);
@@ -188,6 +197,18 @@ export default function ThreadScreen({ route, navigation }: any) {
     }
   };
 
+  const handleProfilePress = (item: any) => {
+    if (item.business_id && item.business) {
+      navigation.navigate('BusinessProfile', { business: item.business, session });
+    } else if (item.author_id && item.author) {
+      if (item.author_id === session?.user?.id) {
+        navigation.navigate('Profile', { session });
+      } else {
+        navigation.navigate('PublicProfile', { userProfile: item.author, session });
+      }
+    }
+  };
+
   const formatTime = (isoString: string) => {
     if (!isoString) return '';
     const date = new Date(isoString);
@@ -203,44 +224,53 @@ export default function ThreadScreen({ route, navigation }: any) {
     return date.toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' });
   };
 
-  const renderParentPostHeader = () => (
-    <View style={styles.parentPostContainer}>
-      <View style={styles.postHeader}>
-        {currentPost.author?.avatar_url ? (
-          <Image source={{ uri: currentPost.author.avatar_url }} style={styles.avatarImage} />
-        ) : (
-          <Ionicons name="person-circle" size={40} color="#CBD5E1" />
-        )}
-        <View style={styles.authorDetails}>
-          <Text style={styles.authorName}>{currentPost.author?.username || 'Community Member'}</Text>
-          <Text style={styles.postTopicBadge}>{currentPost.topic}</Text>
-        </View>
-      </View>
-      <Text style={styles.postTitle}>{currentPost.title}</Text>
-      <Text style={styles.postBodyText}>{currentPost.content}</Text>
-      
-      {currentPost.media_url && (
-        <TouchableOpacity 
-          style={styles.mediaContainer} 
-          activeOpacity={0.9} 
-          onPress={() => setFullScreenImage(currentPost.media_url)}
-        >
-          <Image source={{ uri: currentPost.media_url }} style={styles.postMedia} />
-        </TouchableOpacity>
-      )}
-      
-      <TouchableOpacity 
-        style={styles.opReplyButton} 
-        onPress={() => { setEditingCommentId(null); setReplyingTo({ author: currentPost.author }); }}
-      >
-        <Ionicons name="arrow-undo-outline" size={16} color="#64748B" />
-        <Text style={styles.opReplyText}>Reply to Original Post</Text>
-      </TouchableOpacity>
+  const renderParentPostHeader = () => {
+    const displayAvatar = currentPost.business?.logo_url || currentPost.author?.avatar_url;
+    const displayName = currentPost.business?.name || currentPost.author?.username || 'Community Member';
 
-      <View style={styles.divider} />
-      <Text style={styles.commentsCountLabel}>Replies ({comments.length})</Text>
-    </View>
-  );
+    return (
+      <View style={styles.parentPostContainer}>
+        <TouchableOpacity 
+          style={styles.postHeader} 
+          activeOpacity={0.7}
+          onPress={() => handleProfilePress(currentPost)}
+        >
+          {displayAvatar ? (
+            <Image source={{ uri: displayAvatar }} style={styles.avatarImage} />
+          ) : (
+            <Ionicons name={currentPost.business ? "briefcase" : "person-circle"} size={40} color="#CBD5E1" />
+          )}
+          <View style={styles.authorDetails}>
+            <Text style={styles.authorName}>{displayName}</Text>
+            <Text style={styles.postTopicBadge}>{currentPost.topic}</Text>
+          </View>
+        </TouchableOpacity>
+        <Text style={styles.postTitle}>{currentPost.title}</Text>
+        <Text style={styles.postBodyText}>{currentPost.content}</Text>
+        
+        {currentPost.media_url && (
+          <TouchableOpacity 
+            style={styles.mediaContainer} 
+            activeOpacity={0.9} 
+            onPress={() => setFullScreenImage(currentPost.media_url)}
+          >
+            <Image source={{ uri: currentPost.media_url }} style={styles.postMedia} />
+          </TouchableOpacity>
+        )}
+        
+        <TouchableOpacity 
+          style={styles.opReplyButton} 
+          onPress={() => { setEditingCommentId(null); setReplyingTo({ author: currentPost.author }); }}
+        >
+          <Ionicons name="arrow-undo-outline" size={16} color="#64748B" />
+          <Text style={styles.opReplyText}>Reply to Original Post</Text>
+        </TouchableOpacity>
+
+        <View style={styles.divider} />
+        <Text style={styles.commentsCountLabel}>Replies ({comments.length})</Text>
+      </View>
+    );
+  };
 
   const renderCommentItem = ({ item }: { item: any }) => {
     const contentParts = item.content.split(' ');
@@ -249,7 +279,11 @@ export default function ThreadScreen({ route, navigation }: any) {
     return (
       <View style={styles.commentCard}>
         <View style={styles.commentHeader}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+          <TouchableOpacity 
+            style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+            activeOpacity={0.7}
+            onPress={() => handleProfilePress(item)}
+          >
             {item.author?.avatar_url ? (
               <Image source={{ uri: item.author.avatar_url }} style={styles.commentAvatar} />
             ) : (
@@ -257,7 +291,7 @@ export default function ThreadScreen({ route, navigation }: any) {
             )}
             <Text style={styles.commentAuthorName}>{item.author?.username || 'Member'}</Text>
             <Text style={styles.commentTime}> • {formatTime(item.created_at)}</Text>
-          </View>
+          </TouchableOpacity>
 
           {/* EDIT/DELETE Dropdown for Comment Authors */}
           {session?.user?.id === item.author_id && (

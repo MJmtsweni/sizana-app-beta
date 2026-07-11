@@ -23,13 +23,12 @@ export default function EventDetailScreen({ route, navigation }: any) {
   async function fetchEventDetails() {
     try {
       setLoading(true);
-      // JOIN with business and creator tables
       const { data, error } = await supabase
         .from('events')
         .select(`
           *,
-          creator:creator_id ( username, avatar_url ),
-          business:business_id ( name, logo_url ),
+          creator:creator_id ( * ),
+          business:business_id ( * ),
           rsvps:event_rsvps ( user_id )
         `)
         .eq('id', eventId)
@@ -49,6 +48,18 @@ export default function EventDetailScreen({ route, navigation }: any) {
       setLoading(false);
     }
   }
+
+  const handleProfilePress = () => {
+    if (event.business_id && event.business) {
+      navigation.navigate('BusinessProfile', { business: event.business, session });
+    } else if (event.creator_id && event.creator) {
+      if (event.creator_id === session?.user?.id) {
+        navigation.navigate('Profile', { session });
+      } else {
+        navigation.navigate('PublicProfile', { userProfile: event.creator, session });
+      }
+    }
+  };
 
   // --- IDENTITY RESOLUTION ---
   const displayAvatar = event?.business?.logo_url || event?.creator?.avatar_url;
@@ -121,8 +132,12 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
           <Text style={styles.eventTitle}>{event.title}</Text>
 
-          {/* DYNAMIC HOST ROW */}
-          <View style={styles.creatorRow}>
+          {/* DYNAMIC HOST ROW WITH ROUTING */}
+          <TouchableOpacity 
+            style={styles.creatorRow}
+            activeOpacity={0.7}
+            onPress={handleProfilePress}
+          >
             {displayAvatar ? (
               <Image source={{ uri: displayAvatar }} style={styles.creatorAvatar} />
             ) : (
@@ -132,7 +147,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
               <Text style={styles.creatorName}>{displayName}</Text>
               <Text style={styles.creatorLabel}>{isBusinessEvent ? 'Business Host' : 'Event Organizer'}</Text>
             </View>
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.divider} />
 
@@ -175,7 +190,6 @@ export default function EventDetailScreen({ route, navigation }: any) {
     </View>
   );
 }
-
 
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },

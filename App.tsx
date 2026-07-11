@@ -6,7 +6,9 @@ import { NavigationContainer, useNavigation, LinkingOptions } from '@react-navig
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import BusinessProfileScreen from './src/screens/main/BusinessProfileScreen';
+import FriendsScreen from './src/screens/main/FriendsScreen';
 import ForgotPasswordScreen from './src/screens/auth/ForgotPasswordScreen';
+import PublicProfileScreen from './src/screens/main/PublicProfileScreen';
 import AppHeader from './src/screens/main/AppHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from './src/lib/supabase';
@@ -202,7 +204,11 @@ export default function App() {
               options={{ headerShown: false }}
             />
 
+            <Stack.Screen name="Friends" component={FriendsScreen} options={{ headerShown: false }} 
+/>
+
             <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="PublicProfile" component={PublicProfileScreen} options={{ headerShown: false }} />
           </>
         ) : (
           <>
