@@ -437,7 +437,7 @@ export default function ProfileScreen({ route, navigation }: any) {
         contentContainerStyle={styles.tabContentRow}
       >
         {/* Added 'Reviews' to the array */}
-        {['Posts', 'My RSVPs', 'Businesses', 'Shop', 'Reviews'].map(tab => {
+        {['Posts', 'My RSVPs', 'Businesses', 'Market', 'Reviews'].map(tab => {
           const active = activeTab === tab;
           return (
             <TouchableOpacity 
@@ -520,7 +520,7 @@ export default function ProfileScreen({ route, navigation }: any) {
         />
       )}
 
-      {activeTab === 'Shop' && (
+      {activeTab === 'Market' && (
         <FlatList 
           data={userListings} 
           keyExtractor={(item) => item.id} 
@@ -752,7 +752,7 @@ const styles = StyleSheet.create({
   editProfileBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#F1F5F9', borderRadius: 20, alignSelf: 'flex-start' },
   editProfileBtnText: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
 
-  tabContainer: { backgroundColor: '#F8FAFC', flexGrow: 0 },
+  tabContainer: { backgroundColor: '#F8FAFC', height: 54, flexShrink: 0 },
   tabContentRow: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, alignItems: 'center' },
   tabButton: { alignItems: 'center', marginRight: 24 },
   tabText: { fontSize: 14, fontWeight: '700', color: '#94A3B8' },

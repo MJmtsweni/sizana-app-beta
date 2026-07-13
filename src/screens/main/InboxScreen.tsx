@@ -8,24 +8,20 @@ import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function InboxScreen({ route, navigation, session: directSession }: any) {
-  // Session can arrive from multiple navigation paths
   const session = route?.params?.session || directSession || route?.params?.params?.session;
-
-  // Normalise params — flatten nested params if present
   const rawParams = route?.params?.params || route?.params;
 
-  // A direct chat is opened when sellerId is present in params
   const incomingChat = rawParams?.sellerId ? rawParams : null;
 
   const [messages, setMessages] = useState<any[]>([]);
   const [activeChatPartner, setActiveChatPartner] = useState<string | null>(null);
   const [activeChatName, setActiveChatName] = useState<string>('Messages');
   const [activeChatAvatar, setActiveChatAvatar] = useState<string | null>(null);
-  // activeItemId is stored as item_id on messages — used for business context
+  
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  // activeBusinessId is used to scope messages to a specific business (when present)
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [activeChatContext, setActiveChatContext] = useState<string | null>(null);
+  const [activeContextItem, setActiveContextItem] = useState<any>(null); // NEW: Holds the full marketplace item payload
 
   const [conversations, setConversations] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -37,24 +33,28 @@ export default function InboxScreen({ route, navigation, session: directSession 
   useEffect(() => {
     if (incomingChat?.sellerId) {
       const sellerId: string = incomingChat.sellerId;
-      // Guard: don't proceed with an undefined/null uuid
       if (!sellerId || sellerId === 'undefined') {
         fetchConversationsSummary();
         return;
       }
 
-      const isMarketplace = !!incomingChat.itemTitle && !incomingChat.businessName;
+      const isMarketplace = !!incomingChat.contextItem && !incomingChat.businessName;
 
       setActiveChatPartner(sellerId);
       setActiveChatName(incomingChat.sellerName || 'Member');
       setActiveChatAvatar(incomingChat.sellerAvatar || null);
       setActiveItemId(incomingChat.itemId || null);
       setActiveBusinessId(incomingChat.businessId || null);
-      setActiveChatContext(incomingChat.businessName || incomingChat.itemTitle || null);
+      setActiveChatContext(incomingChat.businessName || incomingChat.contextItem?.title || null);
+      
+      // Save the full item payload to render the top banner
+      if (incomingChat.contextItem) {
+        setActiveContextItem(incomingChat.contextItem);
+      }
 
-      // Pre-fill only for marketplace listings
-      if (isMarketplace && incomingChat.itemTitle) {
-        setNewMessage(`Hi, is "${incomingChat.itemTitle}" still available?`);
+      // Pre-fill only for new marketplace listing inquiries
+      if (isMarketplace && incomingChat.contextItem) {
+        setNewMessage(`Hi ${incomingChat.sellerName}, is "${incomingChat.contextItem.title}" still available?`);
       }
 
       fetchChatMessages(sellerId, incomingChat.itemId || null);
@@ -86,7 +86,6 @@ export default function InboxScreen({ route, navigation, session: directSession 
             setMessages((prev) => {
               const alreadyExists = prev.some(m => m.id === incoming.id);
               if (alreadyExists) return prev;
-              // Swap out the optimistic temp message
               const filtered = prev.filter(m => !String(m.id).startsWith('temp-'));
               return [...filtered, incoming];
             });
@@ -121,7 +120,6 @@ export default function InboxScreen({ route, navigation, session: directSession 
     return () => { supabase.removeChannel(listChannel); };
   }, [session?.user?.id, activeChatPartner]);
 
-
   // ─── Mark messages as read ────────────────────────────────────────────────
   async function markMessagesAsRead(partnerId: string, itemId: string | null = null) {
   if (!session?.user?.id || !partnerId) return;
@@ -144,25 +142,15 @@ export default function InboxScreen({ route, navigation, session: directSession 
 }
 
   // ─── Fetch conversation list ──────────────────────────────────────────────
-  // NOTE: we do NOT join on item_id → businesses because there is no FK in the
-  // schema. Instead we collect unique item_ids and do a separate lookup.
   async function fetchConversationsSummary() {
     try {
       setLoading(true);
       if (!session?.user?.id) return;
 
-      // Step 1: fetch all messages for this user — no business join
       const { data, error } = await supabase
         .from('messages')
         .select(`
-          id,
-          content,
-          created_at,
-          sender_id,
-          receiver_id,
-          is_read,
-          item_id,
-          business_id,
+          id, content, created_at, sender_id, receiver_id, is_read, item_id, business_id,
           sender:sender_id ( id, username, avatar_url ),
           receiver:receiver_id ( id, username, avatar_url )
         `)
@@ -172,18 +160,12 @@ export default function InboxScreen({ route, navigation, session: directSession 
       if (error) throw error;
       if (!data) return;
 
-      // Step 2: collect unique non-null business_ids so we can look up business names.
-      // NOTE: business_id and item_id are separate columns — item_id is used for
-      // marketplace listings and has no FK, business_id points at a real business.
       const businessIds = [
         ...new Set(
-          data
-            .map((m: any) => m.business_id)
-            .filter((id: any) => id && id !== 'null')
+          data.map((m: any) => m.business_id).filter((id: any) => id && id !== 'null')
         ),
       ] as string[];
 
-      // Step 3: fetch business name + logo for those ids (single query, no FK needed)
       let businessMap: Record<string, { name: string; logo_url: string | null }> = {};
       if (businessIds.length > 0) {
         const { data: bizData } = await supabase
@@ -198,9 +180,6 @@ export default function InboxScreen({ route, navigation, session: directSession 
         }
       }
 
-      // Step 4: build one entry per unique (partnerId + item_id) thread.
-      // This keeps personal DMs, business chats, and marketplace threads separate
-      // even when they involve the same person.
       const uniqueChats: Record<string, any> = {};
 
       data.forEach((msg: any) => {
@@ -210,7 +189,6 @@ export default function InboxScreen({ route, navigation, session: directSession 
         const isUnreadInbound = !isOutbound && !msg.is_read;
         const biz = msg.business_id ? businessMap[msg.business_id] : null;
 
-        // Composite key: group by partner AND context (business/item or personal)
         const threadKey = `${partnerId}::${msg.business_id || msg.item_id || 'personal'}`;
 
         if (!uniqueChats[threadKey]) {
@@ -221,21 +199,13 @@ export default function InboxScreen({ route, navigation, session: directSession 
             lastMessageIsOutbound: isOutbound,
             timestamp: msg.created_at,
             partnerId,
-            // Show business name as the card title when there's a business context,
-            // otherwise fall back to the person's username
             partnerName: biz?.name || partnerProfile?.username || 'Sizana Member',
             partnerAvatar: biz?.logo_url || partnerProfile?.avatar_url || null,
             businessName: biz?.name || null,
             businessLogo: biz?.logo_url || null,
-            // Keep these separate — itemId is a market_items id (no FK),
-            // businessId is a real businesses id (has FK). Never conflate them.
             itemId: msg.item_id || null,
             businessId: msg.business_id || null,
-            threadLabel: biz?.name
-              ? `Business: ${biz.name}`
-              : msg.item_id
-              ? 'Marketplace'
-              : null,
+            threadLabel: biz?.name ? `Business: ${biz.name}` : msg.item_id ? 'Marketplace' : null,
             unreadCount: isUnreadInbound ? 1 : 0,
           };
         } else {
@@ -273,9 +243,6 @@ export default function InboxScreen({ route, navigation, session: directSession 
         )
         .order('created_at', { ascending: true });
 
-      // Scope to the specific thread:
-      // - business/marketplace thread: filter by item_id
-      // - personal thread: only messages where item_id IS NULL
       if (itemId) {
         query = query.eq('item_id', itemId);
       } else {
@@ -324,11 +291,9 @@ export default function InboxScreen({ route, navigation, session: directSession 
         content: messageContent,
       };
       
-      // Use your active state variables directly
       if (activeItemId && activeItemId !== 'undefined') insertPayload.item_id = activeItemId;
       if (activeBusinessId && activeBusinessId !== 'undefined') insertPayload.business_id = activeBusinessId;
 
-      // Add .select() to immediately return the saved row, then replace the temp message
       const { data, error } = await supabase
         .from('messages')
         .insert(insertPayload)
@@ -337,18 +302,16 @@ export default function InboxScreen({ route, navigation, session: directSession 
 
       if (error) throw error;
 
-      // Instantly swap the temp clock message for the real database message
       setMessages((prev) => prev.map(m => m.id === tempId ? data : m));
 
-      // Notify the receiver of a new message
-const { error: notifError } = await supabase.from('notifications').insert({
-  actor_id: session.user.id,
-  receiver_id: activeChatPartner,
-  type: 'message',
-  target_id: activeItemId || null,
-  is_read: false,
-});
-if (notifError) console.error('Message notification error:', notifError.message);
+      const { error: notifError } = await supabase.from('notifications').insert({
+        actor_id: session.user.id,
+        receiver_id: activeChatPartner,
+        type: 'message',
+        target_id: session.user.id, 
+        is_read: false,
+      });
+      if (notifError) console.error('Message notification error:', notifError.message);
       
     } catch (error: any) {
       setMessages((prev) => prev.filter(m => m.id !== tempId));
@@ -359,7 +322,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
 
   // ─── Delete a message ─────────────────────────────────────────────────────
   const handleDeleteMessage = (messageId: string) => {
-    // Temp messages haven't been committed to the DB yet — just remove locally
     if (String(messageId).startsWith('temp-')) {
       setMessages(prev => prev.filter(m => m.id !== messageId));
       return;
@@ -374,21 +336,18 @@ if (notifError) console.error('Message notification error:', notifError.message)
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            // Optimistic removal
             setMessages(prev => prev.filter(m => m.id !== messageId));
             try {
               const { error } = await supabase
                 .from('messages')
                 .delete()
                 .eq('id', messageId)
-                .eq('sender_id', session.user.id); // extra safety — only own messages
+                .eq('sender_id', session.user.id); 
 
               if (error) throw error;
-              // Refresh the conversation list so the preview updates
               fetchConversationsSummary();
             } catch (e: any) {
               Alert.alert('Delete Failed', e.message);
-              // Re-fetch to restore the message if delete failed
               fetchChatMessages(activeChatPartner!, activeItemId);
             }
           },
@@ -396,14 +355,27 @@ if (notifError) console.error('Message notification error:', notifError.message)
       ]
     );
   };
+
   const handleOpenConversation = async (item: any) => {
     await markMessagesAsRead(item.partnerId, item.itemId || null);
     setActiveChatPartner(item.partnerId);
-    setActiveChatName(item.partnerName);       // already set to biz name when relevant
-    setActiveChatAvatar(item.partnerAvatar);   // already set to biz logo when relevant
+    setActiveChatName(item.partnerName);       
+    setActiveChatAvatar(item.partnerAvatar);   
     setActiveItemId(item.itemId || null);
     setActiveBusinessId(item.businessId || null);
     setActiveChatContext(item.threadLabel || null);
+    
+    // NEW: If this is an existing marketplace conversation, fetch the item details so the banner displays
+    if (item.itemId) {
+      const { data: marketData } = await supabase
+        .from('market_items')
+        .select('*')
+        .eq('id', item.itemId)
+        .single();
+        
+      if (marketData) setActiveContextItem(marketData);
+    }
+
     fetchChatMessages(item.partnerId, item.itemId || null);
   };
 
@@ -413,6 +385,7 @@ if (notifError) console.error('Message notification error:', notifError.message)
     setActiveChatName('Messages');
     setActiveChatAvatar(null);
     setActiveChatContext(null);
+    setActiveContextItem(null); 
     setActiveItemId(null);
     setActiveBusinessId(null);
     setMessages([]);
@@ -421,8 +394,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
   };
 
   // ─── Delete an entire thread ──────────────────────────────────────────────
-  // "Delete for me" model — removes all messages in this thread where the
-  // current user is either sender or receiver. The other party is unaffected.
   const handleDeleteThread = (
     partnerId: string,
     itemId: string | null,
@@ -438,13 +409,11 @@ if (notifError) console.error('Message notification error:', notifError.message)
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            // Optimistically remove from local list immediately
             setConversations(prev =>
               prev.filter(c => !(c.partnerId === partnerId && (c.businessId || null) === itemId))
             );
 
             try {
-              // Build the base filter — all messages between these two users
               const sentFilter = `sender_id.eq.${session.user.id},receiver_id.eq.${partnerId}`;
               const receivedFilter = `sender_id.eq.${partnerId},receiver_id.eq.${session.user.id}`;
 
@@ -453,7 +422,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
                 .delete()
                 .or(`${sentFilter},${receivedFilter}`);
 
-              // Scope to the specific thread (business / marketplace / personal)
               if (itemId) {
                 query = query.eq('item_id', itemId);
               } else {
@@ -466,7 +434,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
               onSuccess?.();
             } catch (e: any) {
               Alert.alert('Delete Failed', e.message);
-              // Restore the list on failure
               fetchConversationsSummary();
             }
           },
@@ -474,6 +441,7 @@ if (notifError) console.error('Message notification error:', notifError.message)
       ]
     );
   };
+
   const formatTimestamp = (isoString: string) => {
     if (!isoString) return '';
     const date = new Date(isoString);
@@ -514,7 +482,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
       return `Yesterday ${timeString}`;
     } else {
       const dateOptions: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-      // Append the year only if the message is from a previous year
       if (date.getFullYear() !== now.getFullYear()) {
         dateOptions.year = 'numeric';
       }
@@ -611,7 +578,7 @@ if (notifError) console.error('Message notification error:', notifError.message)
         </Text>
         <View style={styles.bubbleStatusMetaRow}>
   <Text 
-    numberOfLines={1} // CRITICAL FIX: Forces the date to stay on a single line
+    numberOfLines={1}
     style={[styles.timestampText, isMine ? styles.timestampMine : styles.timestampTheirs]}
   >
     {formatBubbleTimestamp(item.created_at)}
@@ -631,7 +598,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
     return (
       <View style={[styles.bubbleWrapper, isMine ? styles.bubbleMine : styles.bubbleTheirs]}>
         {isMine ? (
-          // Long-press to delete — only on own messages
           <TouchableOpacity
             activeOpacity={0.85}
             onLongPress={() => handleDeleteMessage(item.id)}
@@ -640,7 +606,6 @@ if (notifError) console.error('Message notification error:', notifError.message)
             {bubble}
           </TouchableOpacity>
         ) : (
-          // Received messages are not interactive
           bubble
         )}
       </View>
@@ -687,7 +652,7 @@ if (notifError) console.error('Message notification error:', notifError.message)
                   activeChatPartner!,
                   activeItemId,
                   activeChatName,
-                  handleBackToList  // go back to inbox list after deletion
+                  handleBackToList 
                 )
               }
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -696,6 +661,26 @@ if (notifError) console.error('Message notification error:', notifError.message)
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* INJECT MARKETPLACE BANNER HERE */}
+        {activeContextItem && (
+          <TouchableOpacity 
+            style={styles.contextBanner}
+            activeOpacity={0.9}
+          >
+            {activeContextItem.image_url ? (
+              <Image source={{ uri: activeContextItem.image_url }} style={styles.contextImage} />
+            ) : (
+              <View style={styles.contextPlaceholder}>
+                <Ionicons name="pricetag" size={20} color="#94A3B8" />
+              </View>
+            )}
+            <View style={styles.contextDetails}>
+              <Text style={styles.contextTitle} numberOfLines={1}>{activeContextItem.title}</Text>
+              <Text style={styles.contextPrice}>R {Number(activeContextItem.price).toLocaleString('en-ZA')}</Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         {loading ? (
           <View style={styles.centered}>
@@ -859,6 +844,21 @@ const styles = StyleSheet.create({
   chatHeaderAvatar: { width: '100%', height: '100%' },
   headerTitleText: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   headerSubtitleText: { fontSize: 11, color: '#64748B', fontWeight: '500', marginTop: 1 },
+  
+  contextBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F8FAFC', padding: 12,
+    borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
+  },
+  contextImage: { width: 40, height: 40, borderRadius: 8 },
+  contextPlaceholder: {
+    width: 40, height: 40, borderRadius: 8, backgroundColor: '#E2E8F0',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  contextDetails: { flex: 1, marginLeft: 12 },
+  contextTitle: { fontSize: 14, fontWeight: '600', color: '#475569' },
+  contextPrice: { fontSize: 14, fontWeight: '800', color: '#1E293B', marginTop: 2 },
+  
   messagesScrollList: { padding: 16, paddingBottom: 24 },
   emptyChat: { alignItems: 'center', marginTop: 80 },
   emptyChatText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 },
@@ -866,31 +866,20 @@ const styles = StyleSheet.create({
   bubbleMine: { justifyContent: 'flex-end' },
   bubbleTheirs: { justifyContent: 'flex-start' },
   bubbleContainer: { 
-    paddingHorizontal: 14, 
-    paddingTop: 8, 
-    paddingBottom: 6, 
-    borderRadius: 18, 
-    maxWidth: '82%', 
-    minWidth: 90, 
+    paddingHorizontal: 14, paddingTop: 8, paddingBottom: 6, 
+    borderRadius: 18, maxWidth: '82%', minWidth: 90, 
   },
   containerMine: { backgroundColor: '#34C759', borderBottomRightRadius: 4 },
   containerTheirs: {
     backgroundColor: '#fff', borderBottomLeftRadius: 4,
     borderWidth: 1, borderColor: '#E2E8F0',
   },
-  bubbleText: { 
-    fontSize: 15, 
-    lineHeight: 22, 
-    fontWeight: '500' 
-  },
+  bubbleText: { fontSize: 15, lineHeight: 22, fontWeight: '500' },
   textMine: { color: '#fff' },
   textTheirs: { color: '#334155' },
   bubbleStatusMetaRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'flex-end', 
-    alignItems: 'center', 
-    marginTop: 4, 
-    width: '100%', 
+    flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', 
+    marginTop: 4, width: '100%', 
   },
   timestampText: { fontSize: 10, fontWeight: '600', flexShrink: 0, },
   timestampMine: { color: '#D1FAE5' },

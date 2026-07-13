@@ -68,7 +68,7 @@ function MainTabs({ session }: any) {
       screenOptions={({ route }) => ({
         tabBarIcon: ({ color, size }) => {
           let iconName: any;
-          if (route.name === 'Buy & Sell') iconName = 'pricetag';
+          if (route.name === 'Market') iconName = 'pricetag';
           else if (route.name === 'Forums') iconName = 'chatbubbles';
           else if (route.name === 'Business') iconName = 'briefcase';
           else if (route.name === 'Events') iconName = 'calendar';
@@ -82,18 +82,14 @@ function MainTabs({ session }: any) {
       })}
     >
       <Tab.Screen
-        name="Buy & Sell"
+        name="Market"
         component={MarketScreen}
         initialParams={{ session: session }}
       />
-      <Tab.Screen name="Forums" component={ForumsScreen} initialParams={{ session: session }} />
       <Tab.Screen name="Business" component={BusinessScreen} initialParams={{ session: session }} />
       <Tab.Screen name="Events" component={EventsScreen} initialParams={{ session: session }} />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        initialParams={{ session: session }}
-      />
+      <Tab.Screen name="Forums" component={ForumsScreen} initialParams={{ session: session }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} initialParams={{ session: session }}/>
     </Tab.Navigator>
   );
 }
@@ -107,11 +103,11 @@ const linking: LinkingOptions<any> = {
     screens: {
       Main: {
         screens: {
-          'Buy & Sell': 'market',
-          Forums: 'forums',
-          Business: 'business',
-          Events: 'events',
-          Profile: 'profile',
+          'Market': 'market',
+          'Forums': 'forums',
+          'Business': 'business',
+          'Events': 'events',
+          'Profile': 'profile',
         },
       },
       Inbox: 'inbox',

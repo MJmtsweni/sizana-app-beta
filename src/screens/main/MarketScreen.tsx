@@ -143,7 +143,6 @@ export default function MarketScreen({ route, session: directSession, navigation
     }
   }
 
-  // Unified create / edit handler — branches on editingItemId
   async function handleCreateListing() {
     if (!newTitle || !newPrice) {
       Alert.alert('Missing Fields', 'Please fill in a title and price.');
@@ -163,7 +162,6 @@ export default function MarketScreen({ route, session: directSession, navigation
       };
 
       if (editingItemId) {
-        // --- EDIT MODE: update existing row ---
         const { error } = await supabase
           .from('market_items')
           .update(payload)
@@ -172,7 +170,6 @@ export default function MarketScreen({ route, session: directSession, navigation
         if (error) throw error;
         Alert.alert('Updated', 'Your listing has been updated successfully!');
       } else {
-        // --- CREATE MODE: insert new row ---
         const { error } = await supabase
           .from('market_items')
           .insert({ ...payload, seller_id: session.user.id });
@@ -197,10 +194,9 @@ export default function MarketScreen({ route, session: directSession, navigation
     setNewImageUrl('');
     setNewCategory('Farming');
     setNewLocation('Schweizer-Reneke');
-    setEditingItemId(null); // Reset edit mode on form clear
+    setEditingItemId(null); 
   };
 
-  // Opens the manage alert for the item owner (edit or delete)
   const handleManageListing = () => {
     if (!selectedItem) return;
 
@@ -209,14 +205,13 @@ export default function MarketScreen({ route, session: directSession, navigation
       {
         text: 'Edit',
         onPress: () => {
-          // Pre-populate form with current listing data
           setNewTitle(selectedItem.title);
           setNewPrice(String(selectedItem.price));
           setNewDescription(selectedItem.description || '');
           setNewLocation(selectedItem.location || 'Schweizer-Reneke');
           setNewCategory(selectedItem.category);
           setNewImageUrl(selectedItem.image_url || '');
-          setEditingItemId(selectedItem.id); // Flag edit mode
+          setEditingItemId(selectedItem.id); 
 
           setDetailsModalVisible(false);
           setModalVisible(true);
@@ -242,7 +237,6 @@ export default function MarketScreen({ route, session: directSession, navigation
     ]);
   };
 
-  // Chat initiation routing handler
   const handleMessageSeller = () => {
     if (!selectedItem) return;
 
@@ -253,11 +247,12 @@ export default function MarketScreen({ route, session: directSession, navigation
 
     setDetailsModalVisible(false);
     
+    // Pass the full selectedItem object as contextItem
     navigation.navigate('Inbox', {
       session: session,
       sellerId: selectedItem.seller_id,
       sellerName: selectedItem.users?.username || 'Sizana Member',
-      itemTitle: selectedItem.title,
+      contextItem: selectedItem, 
       itemId: selectedItem.id
     });
   };
@@ -304,7 +299,6 @@ export default function MarketScreen({ route, session: directSession, navigation
 
   return (
     <View style={styles.mainContainer}>
-      {/* --- FILTERS HEADER --- */}
       <View style={styles.filterHeaderLayout}>
         <View style={[styles.searchBarContainer, { flex: 1, marginRight: 6 }]}>
           <Ionicons name="search" size={18} color="#94A3B8" style={styles.searchIcon} />
@@ -326,7 +320,6 @@ export default function MarketScreen({ route, session: directSession, navigation
         </View>
       </View>
 
-      {/* --- CATEGORY PILLS --- */}
       <View style={{ maxHeight: 50, marginBottom: 6 }}>
         <FlatList
           data={categories}
@@ -344,7 +337,6 @@ export default function MarketScreen({ route, session: directSession, navigation
         />
       </View>
 
-      {/* --- PRODUCT GRID --- */}
       {loading && !refreshing ? (
         <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
       ) : (
@@ -365,13 +357,11 @@ export default function MarketScreen({ route, session: directSession, navigation
         />
       )}
 
-      {/* --- FLOATING SELL BUTTON --- */}
       <TouchableOpacity style={styles.fab} activeOpacity={0.8} onPress={() => setModalVisible(true)}>
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.fabText}>Sell</Text>
       </TouchableOpacity>
 
-      {/* --- CREATE / EDIT LISTING MODAL SHEET --- */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -381,7 +371,6 @@ export default function MarketScreen({ route, session: directSession, navigation
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              {/* Title changes based on create vs edit mode */}
               <Text style={styles.modalTitle}>{editingItemId ? 'Edit Listing' : 'Create New Listing'}</Text>
               <TouchableOpacity onPress={() => { setModalVisible(false); clearForm(); }}>
                 <Ionicons name="close-circle" size={28} color="#64748B" />
@@ -423,7 +412,6 @@ export default function MarketScreen({ route, session: directSession, navigation
               <Text style={styles.fieldLabel}>Item Description</Text>
               <TextInput style={[styles.modalInput, styles.modalTextArea]} value={newDescription} onChangeText={setNewDescription} multiline numberOfLines={3} placeholder="Provide item details..." />
 
-              {/* Button label changes based on mode */}
               <TouchableOpacity style={styles.submitListingButton} onPress={handleCreateListing}>
                 <Text style={styles.submitButtonText}>{editingItemId ? 'Save Changes' : 'Publish Listing'}</Text>
               </TouchableOpacity>
@@ -431,20 +419,20 @@ export default function MarketScreen({ route, session: directSession, navigation
           </KeyboardAvoidingView>
         </View>
       </Modal>
-       <RatingModal
-  visible={ratingModalVisible}
-  onClose={() => setRatingModalVisible(false)}
-  raterId={session?.user?.id}
-  rateeId={selectedItem?.seller_id}
-  rateeName={selectedItem?.users?.username || 'this seller'}
-  onSubmitted={fetchListings}
-/>         
-      {/* --- HIGH-FIDELITY MARKETPLACE ITEM DETAILS SHEET --- */}
+
+      <RatingModal
+        visible={ratingModalVisible}
+        onClose={() => setRatingModalVisible(false)}
+        raterId={session?.user?.id}
+        rateeId={selectedItem?.seller_id}
+        rateeName={selectedItem?.users?.username || 'this seller'}
+        onSubmitted={fetchListings}
+      />        
+      
       <Modal animationType="fade" transparent={true} visible={detailsModalVisible} onRequestClose={() => setDetailsModalVisible(false)}>
         <View style={styles.detailsModalOverlay}>
           <View style={styles.detailsModalContent}>
             
-            {/* Top Navigation Row */}
             <View style={styles.detailsHeaderActions}>
               <TouchableOpacity style={styles.circularCloseButton} onPress={() => setDetailsModalVisible(false)}>
                 <Ionicons name="arrow-back" size={24} color="#1E293B" />
@@ -452,7 +440,6 @@ export default function MarketScreen({ route, session: directSession, navigation
 
               <Text style={styles.detailsHeaderTitle}>Market Item</Text>
 
-              {/* Show manage button only to the item owner, spacer for everyone else */}
               {selectedItem?.seller_id === session?.user?.id ? (
                 <TouchableOpacity
                   style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
@@ -468,7 +455,6 @@ export default function MarketScreen({ route, session: directSession, navigation
             {selectedItem && (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
                 
-                {/* 1. FULL SIZE DYNAMIC IMAGE VIEW CONTAINER */}
                 <View style={styles.fullSizeImageFrame}>
                   {selectedItem.image_url ? (
                     <Image source={{ uri: selectedItem.image_url }} style={styles.fullProductImage} />
@@ -479,7 +465,6 @@ export default function MarketScreen({ route, session: directSession, navigation
                   )}
                 </View>
 
-                {/* 2. CORE INFORMATION CARD BODY */}
                 <View style={styles.detailsBodyTextWrapper}>
                   <Text style={styles.detailsPriceText}>{formatCurrency(selectedItem.price)}</Text>
                   <Text style={styles.detailsTitleText}>{selectedItem.title}</Text>
@@ -497,55 +482,48 @@ export default function MarketScreen({ route, session: directSession, navigation
 
                   <View style={styles.dividerLine} />
 
-                  {/* Description Segment */}
                   <Text style={styles.detailsSectionHeading}>Description</Text>
                   <Text style={styles.detailsDescriptionBody}>{selectedItem.description || 'The seller did not include an item description summary.'}</Text>
 
                   <View style={styles.dividerLine} />
 
-                  {/* Seller Profile Segment Row */}
                   <Text style={styles.detailsSectionHeading}>Seller Profile Information</Text>
-<View style={styles.sellerProfileLayoutRow}>
-  <View style={styles.sellerAvatarWrapper}>
-    {selectedItem.users?.avatar_url ? (
-      <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
-    ) : (
-      <Ionicons name="person-circle" size={44} color="#CBD5E1" />
-    )}
-  </View>
-  <View style={{ marginLeft: 12, flex: 1 }}>
-    <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-      {selectedItem.users?.rating != null ? (
-        <Text style={styles.sellerTierLabel}>⭐ {Number(selectedItem.users.rating).toFixed(1)}</Text>
-      ) : (
-        <Text style={styles.sellerTierLabelMuted}>New Member</Text>
-      )}
-      {selectedItem.users?.is_verified && (
-        <Text style={[styles.sellerTierLabel, { marginLeft: 8 }]}>✓ Verified</Text>
-      )}
-    </View>
-    {selectedItem.seller_id !== session?.user?.id && (
-  <TouchableOpacity 
-    style={{ marginTop: 4 }}
-    onPress={() => {
-      // 1. Close the product details sheet
-      setDetailsModalVisible(false); 
-      
-      // 2. Wait for the slide-down animation, then trigger the rating modal
-      setTimeout(() => {
-        setRatingModalVisible(true);
-      }, 350); 
-    }} 
-  >
-    <Text style={styles.rateSellerLink}>Rate this seller</Text>
-  </TouchableOpacity>
-)}
-  </View>
-</View>
+                  <View style={styles.sellerProfileLayoutRow}>
+                    <View style={styles.sellerAvatarWrapper}>
+                      {selectedItem.users?.avatar_url ? (
+                        <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
+                      ) : (
+                        <Ionicons name="person-circle" size={44} color="#CBD5E1" />
+                      )}
+                    </View>
+                    <View style={{ marginLeft: 12, flex: 1 }}>
+                      <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                        {selectedItem.users?.rating != null ? (
+                          <Text style={styles.sellerTierLabel}>⭐ {Number(selectedItem.users.rating).toFixed(1)}</Text>
+                        ) : (
+                          <Text style={styles.sellerTierLabelMuted}>New Member</Text>
+                        )}
+                        {selectedItem.users?.is_verified && (
+                          <Text style={[styles.sellerTierLabel, { marginLeft: 8 }]}>✓ Verified</Text>
+                        )}
+                      </View>
+                      {selectedItem.seller_id !== session?.user?.id && (
+                        <TouchableOpacity 
+                          style={{ marginTop: 4 }}
+                          onPress={() => {
+                            setDetailsModalVisible(false); 
+                            setTimeout(() => {
+                              setRatingModalVisible(true);
+                            }, 350); 
+                          }} 
+                        >
+                          <Text style={styles.rateSellerLink}>Rate this seller</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
 
-                  {/* 3. TRANSACTION ACTION CTA BUTTON
-                      Hidden when viewing your own listing — use the ellipsis to manage instead */}
                   {selectedItem.seller_id !== session?.user?.id && (
                     <TouchableOpacity style={styles.messageSellerActionButton} onPress={handleMessageSeller}>
                       <Ionicons name="chatbubble-ellipses" size={20} color="#fff" style={{ marginRight: 8 }} />
@@ -611,7 +589,6 @@ const styles = StyleSheet.create({
   submitListingButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 10 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   
-  // --- NEW DETAIL VIEW STYLINGS SYSTEM SHEET ---
   detailsModalOverlay: { flex: 1, backgroundColor: '#fff' },
   detailsModalContent: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20 },
   detailsHeaderActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, height: 50, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
@@ -637,5 +614,5 @@ const styles = StyleSheet.create({
   messageSellerActionButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 32, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 3 },
   messageSellerButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   sellerTierLabelMuted: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-rateSellerLink: { fontSize: 12, fontWeight: '700', color: '#3B82F6', marginTop: 4 },
+  rateSellerLink: { fontSize: 12, fontWeight: '700', color: '#3B82F6', marginTop: 4 },
 });

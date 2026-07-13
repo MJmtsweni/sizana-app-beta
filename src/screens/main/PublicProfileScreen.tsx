@@ -26,11 +26,25 @@ export default function PublicProfileScreen({ route, navigation }: any) {
   const [socialLoading, setSocialLoading] = useState(true);
 
   // SAFELY parse interests whether it's the new array format or old string format
-  const userInterests = Array.isArray(userProfile.interests) 
-    ? userProfile.interests 
-    : typeof userProfile.interests === 'string'
-      ? userProfile.interests.split(',').map((i: string) => i.trim()).filter(Boolean)
-      : [];
+  // Safely parse interests to prevent JSON crash
+let userInterests: string[] = [];
+
+if (userProfile?.interests) {
+  if (Array.isArray(userProfile.interests)) {
+    userInterests = userProfile.interests;
+  } else if (typeof userProfile.interests === 'string') {
+    try {
+      // Try to parse it as a JSON array (e.g. '["Tech", "Farming"]')
+      userInterests = JSON.parse(userProfile.interests);
+    } catch (e) {
+      // If it fails (e.g. it's an empty string "" or comma-separated "Tech, Farming"), 
+      // fall back to splitting by comma, or just return an empty array if blank.
+      if (userProfile.interests.trim() !== '') {
+        userInterests = userProfile.interests.split(',').map((i: string) => i.trim());
+      }
+    }
+  }
+}
 
   useFocusEffect(
     useCallback(() => {
@@ -286,12 +300,12 @@ export default function PublicProfileScreen({ route, navigation }: any) {
             {/* INTERESTS PILLS */}
             {userInterests.length > 0 && (
               <View style={styles.interestsContainer}>
-                {userInterests.map((interest: string, index: number) => (
-                  <View key={index} style={styles.interestPill}>
-                    <Text style={styles.interestPillText}>{interest}</Text>
-                  </View>
-                ))}
-              </View>
+  {userInterests.map((interest: string, index: number) => (
+    <View key={index} style={styles.interestPill}>
+      <Text style={styles.interestPillText}>{interest}</Text>
+    </View>
+  ))}
+</View>
             )}
 
             {/* SOCIAL ACTIONS BLOCK */}
@@ -375,9 +389,13 @@ const styles = StyleSheet.create({
   
   bioText: { fontSize: 14, color: '#475569', marginTop: 16, lineHeight: 22 },
   
-  interestsContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 16 },
-  interestPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  interestPillText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
+  interestsContainer: { 
+  flexDirection: 'row', 
+  flexWrap: 'wrap', 
+  marginTop: 16 
+},
+  interestPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  interestPillText: { fontSize: 12, fontWeight: '600', color: '#475569' },
   
   socialActionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 24, gap: 8 },
   primaryButton: { flex: 1.5, flexDirection: 'row', backgroundColor: '#3B82F6', height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },

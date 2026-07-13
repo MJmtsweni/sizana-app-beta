@@ -25,7 +25,7 @@ const INTEREST_CATEGORIES = [
 
 const SA_REGIONS = {
   "Gauteng": ["Johannesburg", "Pretoria", "Centurion", "Midrand"],
-  "North West": ["Schweizer-Reneke", "Potchefstroom", "Klerksdorp", "Mahikeng", "Rustenburg"],
+  "North West": ["Vryburg", "Potchefstroom", "Klerksdorp", "Mahikeng", "Rustenburg"],
   "Western Cape": ["Cape Town", "Stellenbosch", "George", "Paarl"],
   "KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"],
   "Free State": ["Bloemfontein", "Welkom"],
