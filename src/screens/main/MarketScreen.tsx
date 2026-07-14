@@ -41,6 +41,9 @@ export default function MarketScreen({ route, session: directSession, navigation
   // Details Sheet Modal States
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  
+  // PHASE 5: Follow Seller State
+  const [isFollowingSeller, setIsFollowingSeller] = useState(false);
 
   const categories = ['All', 'Farming', 'Electronics', 'Vehicles', 'Business', 'Services'];
   const creationCategories = ['Farming', 'Electronics', 'Vehicles', 'Business', 'Services'];
@@ -87,6 +90,74 @@ export default function MarketScreen({ route, session: directSession, navigation
       temp = temp.filter(item => item.location?.toLowerCase().includes(location.toLowerCase()));
     }
     setFilteredListings(temp);
+  };
+
+  // PHASE 5: Follow Status Check
+  async function checkFollowStatus(sellerId: string) {
+    if (!session?.user?.id || session.user.id === sellerId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('user_followers')
+        .select('id')
+        .match({ follower_id: session.user.id, following_id: sellerId })
+        .single();
+
+      if (data) setIsFollowingSeller(true);
+      else setIsFollowingSeller(false);
+    } catch (error) {
+      // Fails silently if no record is found (which means not following)
+      setIsFollowingSeller(false);
+    }
+  }
+
+  // PHASE 5: Handle Follow Action
+  const handleFollowSeller = async (sellerId: string, sellerName: string) => {
+    Alert.alert(
+      "Connect",
+      `Follow ${sellerName}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Follow", 
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('user_followers')
+                .insert({ 
+                  follower_id: session.user.id, 
+                  following_id: sellerId 
+                });
+                
+              if (error) throw error;
+              
+              setIsFollowingSeller(true);
+              Alert.alert("Success", `You are now following ${sellerName}.`);
+            } catch (e: any) {
+              Alert.alert("Error", e.message);
+            }
+          } 
+        }
+      ]
+    );
+  };
+
+  // PHASE 5: Handle Navigating to Profile
+  const handleSellerProfilePress = () => {
+    if (!selectedItem) return;
+    setDetailsModalVisible(false); // Close the item modal first
+    
+    if (selectedItem.seller_id === session?.user?.id) {
+      navigation.navigate('Profile', { session });
+    } else {
+      // Pass a constructed user profile object to the PublicProfile screen
+      const userProfile = {
+        id: selectedItem.seller_id,
+        username: selectedItem.users?.username,
+        avatar_url: selectedItem.users?.avatar_url,
+      };
+      navigation.navigate('PublicProfile', { userProfile, session });
+    }
   };
 
   async function handlePickProductImage() {
@@ -265,6 +336,8 @@ export default function MarketScreen({ route, session: directSession, navigation
       activeOpacity={0.9}
       onPress={() => {
         setSelectedItem(item);
+        setIsFollowingSeller(false); // Reset state before checking
+        checkFollowStatus(item.seller_id); // Check if we follow this specific seller
         setDetailsModalVisible(true);
       }}
     >
@@ -343,7 +416,7 @@ export default function MarketScreen({ route, session: directSession, navigation
         <FlatList
           data={filteredListings}
           numColumns={2}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => String(item.id)}
           renderItem={renderMarketItem}
           contentContainerStyle={styles.gridContainer}
           columnWrapperStyle={styles.gridColumnWrapper}
@@ -488,40 +561,63 @@ export default function MarketScreen({ route, session: directSession, navigation
                   <View style={styles.dividerLine} />
 
                   <Text style={styles.detailsSectionHeading}>Seller Profile Information</Text>
+                  
+                  {/* PHASE 5: Clickable Seller Profile Row with "+" Follow Button */}
                   <View style={styles.sellerProfileLayoutRow}>
-                    <View style={styles.sellerAvatarWrapper}>
-                      {selectedItem.users?.avatar_url ? (
-                        <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
-                      ) : (
-                        <Ionicons name="person-circle" size={44} color="#CBD5E1" />
-                      )}
-                    </View>
-                    <View style={{ marginLeft: 12, flex: 1 }}>
-                      <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                        {selectedItem.users?.rating != null ? (
-                          <Text style={styles.sellerTierLabel}>⭐ {Number(selectedItem.users.rating).toFixed(1)}</Text>
+                    <TouchableOpacity 
+                      style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                      activeOpacity={0.7}
+                      onPress={handleSellerProfilePress}
+                    >
+                      <View style={styles.sellerAvatarWrapper}>
+                        {selectedItem.users?.avatar_url ? (
+                          <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
                         ) : (
-                          <Text style={styles.sellerTierLabelMuted}>New Member</Text>
-                        )}
-                        {selectedItem.users?.is_verified && (
-                          <Text style={[styles.sellerTierLabel, { marginLeft: 8 }]}>✓ Verified</Text>
+                          <Ionicons name="person-circle" size={44} color="#CBD5E1" />
                         )}
                       </View>
-                      {selectedItem.seller_id !== session?.user?.id && (
-                        <TouchableOpacity 
-                          style={{ marginTop: 4 }}
-                          onPress={() => {
-                            setDetailsModalVisible(false); 
-                            setTimeout(() => {
-                              setRatingModalVisible(true);
-                            }, 350); 
-                          }} 
-                        >
-                          <Text style={styles.rateSellerLink}>Rate this seller</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
+                      
+                      <View style={{ marginLeft: 12, flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
+                          
+                          {/* ONLY Follow option for Market Item Screen */}
+                          {selectedItem.seller_id !== session?.user?.id && !isFollowingSeller && (
+                            <TouchableOpacity 
+                              style={styles.plusButton} 
+                              onPress={() => handleFollowSeller(selectedItem.seller_id, selectedItem.users?.username || 'this seller')}
+                            >
+                              <Ionicons name="add" size={14} color="#fff" />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                          {selectedItem.users?.rating != null ? (
+                            <Text style={styles.sellerTierLabel}>⭐ {Number(selectedItem.users.rating).toFixed(1)}</Text>
+                          ) : (
+                            <Text style={styles.sellerTierLabelMuted}>New Member</Text>
+                          )}
+                          {selectedItem.users?.is_verified && (
+                            <Text style={[styles.sellerTierLabel, { marginLeft: 8 }]}>✓ Verified</Text>
+                          )}
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+
+                    {selectedItem.seller_id !== session?.user?.id && (
+                      <TouchableOpacity 
+                        style={{ marginTop: 4 }}
+                        onPress={() => {
+                          setDetailsModalVisible(false); 
+                          setTimeout(() => {
+                            setRatingModalVisible(true);
+                          }, 350); 
+                        }} 
+                      >
+                        <Text style={styles.rateSellerLink}>Rate this seller</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {selectedItem.seller_id !== session?.user?.id && (
@@ -606,7 +702,7 @@ const styles = StyleSheet.create({
   dividerLine: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 20 },
   detailsSectionHeading: { fontSize: 12, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   detailsDescriptionBody: { fontSize: 15, color: '#334155', fontWeight: '500', lineHeight: 24 },
-  sellerProfileLayoutRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  sellerProfileLayoutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   sellerAvatarWrapper: { width: 46, height: 46, borderRadius: 16, backgroundColor: '#F1F5F9', overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0' },
   sellerAvatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   sellerNameLabel: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
@@ -615,4 +711,5 @@ const styles = StyleSheet.create({
   messageSellerButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   sellerTierLabelMuted: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
   rateSellerLink: { fontSize: 12, fontWeight: '700', color: '#3B82F6', marginTop: 4 },
+  plusButton: { backgroundColor: '#34C759', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
 });

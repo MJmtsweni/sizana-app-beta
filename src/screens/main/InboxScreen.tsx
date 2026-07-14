@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { 
   StyleSheet, Text, View, FlatList, TextInput, 
   TouchableOpacity, KeyboardAvoidingView, Platform, 
@@ -29,40 +29,84 @@ export default function InboxScreen({ route, navigation, session: directSession 
 
   const flatListRef = useRef<FlatList>(null);
 
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: false, 
+    });
+  }, [navigation]);
+  
   // ─── Entry point: open a direct chat or show the inbox list ───────────────
   useEffect(() => {
-    if (incomingChat?.sellerId) {
-      const sellerId: string = incomingChat.sellerId;
-      if (!sellerId || sellerId === 'undefined') {
+    async function verifyAndInitializeChat() {
+      if (incomingChat?.sellerId) {
+        const sellerId: string = incomingChat.sellerId;
+        
+        // If no valid ID, just show the inbox list
+        if (!sellerId || sellerId === 'undefined') {
+          fetchConversationsSummary();
+          return;
+        }
+
+        const isMarketplace = !!incomingChat.contextItem && !incomingChat.businessName;
+
+        // --- PHASE 4 & BLUEPRINT ITEM 4: THE PERMISSION CHECK ---
+        // If it is NOT a marketplace transaction and NOT a business interaction, enforce friendship
+        if (!isMarketplace && !incomingChat.businessName) {
+          try {
+            const { data, error } = await supabase
+              .from('user_friends')
+              .select('status')
+              .or(`and(user_id_1.eq.${session.user.id},user_id_2.eq.${sellerId}),and(user_id_1.eq.${sellerId},user_id_2.eq.${session.user.id})`)
+              .eq('status', 'accepted')
+              .single();
+
+            // If no accepted friendship is found, block access
+            if (error || !data) {
+              Alert.alert(
+                "Permission Denied", 
+                "You must be friends to send private messages. Head to their profile to send a friend request!"
+              );
+              navigation.goBack();
+              return; // Stop execution here
+            }
+          } catch (err) {
+            console.warn("Could not verify permissions:", err);
+            Alert.alert("Error", "Could not verify messaging permissions.");
+            navigation.goBack();
+            return; // Stop execution here
+          }
+        }
+        // ---------------------------------------------------------
+
+        // If permissions pass (or are overridden by Commerce/Business), initialize the chat
+        setActiveChatPartner(sellerId);
+        setActiveChatName(incomingChat.sellerName || 'Member');
+        setActiveChatAvatar(incomingChat.sellerAvatar || null);
+        setActiveItemId(incomingChat.itemId || null);
+        setActiveBusinessId(incomingChat.businessId || null);
+        setActiveChatContext(incomingChat.businessName || incomingChat.contextItem?.title || null);
+        
+        // Save the full item payload to render the top banner
+        if (incomingChat.contextItem) {
+          setActiveContextItem(incomingChat.contextItem);
+        }
+
+        // Pre-fill only for new marketplace listing inquiries
+        if (isMarketplace && incomingChat.contextItem) {
+          setNewMessage(`Hi ${incomingChat.sellerName}, is "${incomingChat.contextItem.title}" still available?`);
+        }
+
+        fetchChatMessages(sellerId, incomingChat.itemId || null);
+        markMessagesAsRead(sellerId, incomingChat.itemId || null);
+      } else {
         fetchConversationsSummary();
-        return;
       }
-
-      const isMarketplace = !!incomingChat.contextItem && !incomingChat.businessName;
-
-      setActiveChatPartner(sellerId);
-      setActiveChatName(incomingChat.sellerName || 'Member');
-      setActiveChatAvatar(incomingChat.sellerAvatar || null);
-      setActiveItemId(incomingChat.itemId || null);
-      setActiveBusinessId(incomingChat.businessId || null);
-      setActiveChatContext(incomingChat.businessName || incomingChat.contextItem?.title || null);
-      
-      // Save the full item payload to render the top banner
-      if (incomingChat.contextItem) {
-        setActiveContextItem(incomingChat.contextItem);
-      }
-
-      // Pre-fill only for new marketplace listing inquiries
-      if (isMarketplace && incomingChat.contextItem) {
-        setNewMessage(`Hi ${incomingChat.sellerName}, is "${incomingChat.contextItem.title}" still available?`);
-      }
-
-      fetchChatMessages(sellerId, incomingChat.itemId || null);
-      markMessagesAsRead(sellerId, incomingChat.itemId || null);
-    } else {
-      fetchConversationsSummary();
     }
+
+    verifyAndInitializeChat();
   }, [route?.params]);
+
+  
 
   // ─── Realtime: active chat window ─────────────────────────────────────────
   useEffect(() => {
@@ -380,7 +424,22 @@ export default function InboxScreen({ route, navigation, session: directSession 
   };
 
   // ─── Back to inbox list ───────────────────────────────────────────────────
+  // ─── Back to inbox list or previous screen ──────────────────────────────────
   const handleBackToList = () => {
+    // If we navigated directly into a chat from another screen (Market/Profile)
+    if (incomingChat?.sellerId) {
+      // Clear the params so it doesn't get stuck in a loop, then go back
+      navigation.setParams({ 
+        sellerId: undefined, 
+        contextItem: undefined, 
+        businessName: undefined, 
+        itemId: undefined 
+      });
+      navigation.goBack();
+      return;
+    }
+
+    // Otherwise, we are just closing a chat to view the Inbox list
     setActiveChatPartner(null);
     setActiveChatName('Messages');
     setActiveChatAvatar(null);
@@ -732,7 +791,19 @@ export default function InboxScreen({ route, navigation, session: directSession 
   return (
     <View style={styles.mainContainer}>
       <View style={styles.inboxTitleBlock}>
-        <Text style={styles.mainInboxTitle}>Inbox</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {/* Main Inbox Back Button */}
+          {navigation.canGoBack() && (
+            <TouchableOpacity 
+              onPress={() => navigation.goBack()} 
+              style={{ marginRight: 12, padding: 4 }}
+            >
+              <Ionicons name="arrow-back" size={26} color="#1E293B" />
+            </TouchableOpacity>
+          )}
+          <Text style={styles.mainInboxTitle}>Inbox</Text>
+        </View>
+        
         {conversations.length > 0 && (
           <Text style={styles.inboxSubtitle}>
             {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
@@ -903,3 +974,4 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: { backgroundColor: '#CBD5E1' },
 });
+

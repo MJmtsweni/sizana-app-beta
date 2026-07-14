@@ -18,22 +18,22 @@ export default function AppHeader({ session, variant, title, displayName, avatar
 
   return (
     <View style={styles.navPanel}>
-      {/* LEFT: avatar+name on Main, plain title on Dashboard.
-          flex:1 + minWidth:0 lets this shrink instead of pushing the
-          absolutely-centered grid button off-center when the name is long. */}
+      {/* LEFT: Avatar only on Main, plain title on Dashboard. */}
       <View style={styles.leftSection}>
         {variant === 'main' ? (
           <View style={styles.userInfo}>
-            <View style={styles.avatarContainer}>
-              {avatarUri ? (
-                <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
-              ) : (
-                <Ionicons name="person-circle" size={40} color="#ccc" />
-              )}
-            </View>
-            <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
-              {displayName}
-            </Text>
+            <TouchableOpacity 
+              activeOpacity={0.8} 
+              onPress={() => navigation.navigate('Profile', { session })}
+            >
+              <View style={styles.avatarContainer}>
+                {avatarUri ? (
+                  <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+                ) : (
+                  <Ionicons name="person-circle" size={40} color="#ccc" />
+                )}
+              </View>
+            </TouchableOpacity>
           </View>
         ) : (
           <Text style={styles.navTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -42,8 +42,7 @@ export default function AppHeader({ session, variant, title, displayName, avatar
         )}
       </View>
 
-      {/* RIGHT: bell + mail, identical everywhere. Fixed content, never shrinks,
-          so its width is predictable and doesn't factor into centering math. */}
+      {/* RIGHT: bell + mail, identical everywhere. */}
       <View style={styles.rightSection}>
         <View style={{ marginRight: 16 }}>
           <NotificationBell session={session} />
@@ -52,9 +51,7 @@ export default function AppHeader({ session, variant, title, displayName, avatar
       </View>
 
       {/* CENTER: grid button, absolutely positioned relative to the whole panel
-          so it stays visually centered no matter how wide the left/right
-          content is. Only shown on Main — Dashboard exits via its own
-          floating button on-screen instead. */}
+          so it stays visually centered no matter how wide the left/right content is. */}
       {variant === 'main' && (
         <View style={styles.centerOverlay}>
           <TouchableOpacity
@@ -84,11 +81,8 @@ const styles = StyleSheet.create({
   },
   leftSection: {
     flex: 1,
-    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    // reserve space so long names truncate before reaching the centered button
-    paddingRight: 48,
   },
   rightSection: {
     flexShrink: 0,
@@ -108,10 +102,28 @@ const styles = StyleSheet.create({
     paddingBottom: 15,
     pointerEvents: 'box-none',
   },
-  gridButton: { padding: 4, pointerEvents: 'auto' },
-  userInfo: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' },
-  avatarContainer: { marginRight: 10 },
-  avatarImage: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#ccc', backgroundColor: '#eee' },
-  userName: { flex: 1, minWidth: 0, fontSize: 18, fontWeight: '600', color: '#333' },
-  navTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B' },
+  gridButton: { 
+    padding: 4, 
+    pointerEvents: 'auto' 
+  },
+  userInfo: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  avatarContainer: { 
+    marginRight: 10 
+  },
+  avatarImage: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    borderWidth: 1, 
+    borderColor: '#ccc', 
+    backgroundColor: '#eee' 
+  },
+  navTitle: { 
+    fontSize: 18, 
+    fontWeight: '800', 
+    color: '#1E293B' 
+  },
 });
