@@ -10,6 +10,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../../lib/supabase'; // Adjust path if necessary
+import { useUserLocation } from '../../hooks/useUserLocation';
+import { useDeviceLocation } from '../../hooks/useDeviceLocation';
+import { useLocationCapture } from '../../hooks/useLocationCapture';
+import { getDistanceKm, formatDistance } from '../../lib/distance';
+import ScopeToggle, { Scope } from '../../components/ScopeToggle';
 
 export default function BusinessScreen({ navigation, route }: any) {
   const session = route?.params?.session;
@@ -24,6 +29,10 @@ export default function BusinessScreen({ navigation, route }: any) {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [scope, setScope] = useState<Scope>('explore');
+  const { myLocation } = useUserLocation(session);
+  const { coords: deviceCoords, status: deviceLocationStatus } = useDeviceLocation();
+  const { capturing: capturingLocation, captureLocation } = useLocationCapture();
   
   // Excluded 'All' from the registration form choices to prevent users from creating an 'All' business
   const filterCategories = ['All', 'Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
@@ -41,7 +50,9 @@ export default function BusinessScreen({ navigation, route }: any) {
     whatsapp_number: '', 
     website_url: '', 
     logoUri: null as string | null, 
-    coverPhotoUri: null as string | null 
+    coverPhotoUri: null as string | null,
+    latitude: null as number | null,
+    longitude: null as number | null,
   });
 
   // Track visibility for Android modals
@@ -62,7 +73,7 @@ export default function BusinessScreen({ navigation, route }: any) {
     useCallback(() => { fetchBusinesses(); }, [])
   );
 
-  React.useEffect(() => { applyFilters(); }, [searchQuery, activeCategory, businesses]);
+  React.useEffect(() => { applyFilters(); }, [searchQuery, activeCategory, businesses, scope, myLocation, deviceCoords]);
 
   async function fetchBusinesses() {
     try {
@@ -87,6 +98,32 @@ export default function BusinessScreen({ navigation, route }: any) {
 
   const applyFilters = () => {
     let result = [...businesses];
+
+    if (scope === 'home') {
+      if (!myLocation) {
+        setFilteredBusinesses([]);
+        return;
+      }
+      result = result.filter(b => b.location?.toLowerCase().includes(myLocation.toLowerCase()));
+    } else if (scope === 'nearby') {
+      if (deviceCoords) {
+        // Real distance ranking — only listings with saved coordinates can participate.
+        result = result
+          .filter(b => b.latitude != null && b.longitude != null)
+          .map(b => ({
+            ...b,
+            _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, b.latitude, b.longitude),
+          }))
+          .sort((a, b) => a._distanceKm - b._distanceKm);
+      } else if (myLocation) {
+        // GPS denied/unavailable — fall back to the Home-style text match.
+        result = result.filter(b => b.location?.toLowerCase().includes(myLocation.toLowerCase()));
+      } else {
+        setFilteredBusinesses([]);
+        return;
+      }
+    }
+
     if (activeCategory !== 'All') result = result.filter(b => b.category === activeCategory);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -191,7 +228,9 @@ export default function BusinessScreen({ navigation, route }: any) {
         website_url: newBiz.website_url,
         operating_hours: `${formatTime(openTime)} - ${formatTime(closeTime)}`,
         logo_url: finalLogoUrl,
-        cover_photo_url: finalCoverUrl
+        cover_photo_url: finalCoverUrl,
+        latitude: newBiz.latitude,
+        longitude: newBiz.longitude,
       }).select().single();
 
       if (error) throw error;
@@ -204,7 +243,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       fetchBusinesses();
       
       // Full Form Reset
-      setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', website_url: '', logoUri: null, coverPhotoUri: null });
+      setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', website_url: '', logoUri: null, coverPhotoUri: null, latitude: null, longitude: null });
       setOpenTime(new Date(new Date().setHours(8, 0, 0, 0)));
       setCloseTime(new Date(new Date().setHours(17, 0, 0, 0)));
 
@@ -280,6 +319,9 @@ export default function BusinessScreen({ navigation, route }: any) {
           <View style={styles.locationRow}>
             <Ionicons name="location-outline" size={14} color="#64748B" />
             <Text style={styles.locationText}>{item.location}</Text>
+            {item._distanceKm != null && (
+              <Text style={styles.distanceBadge}>· {formatDistance(item._distanceKm)}</Text>
+            )}
           </View>
         </View>
 
@@ -390,6 +432,17 @@ export default function BusinessScreen({ navigation, route }: any) {
             <Ionicons name="add-circle" size={28} color="#34C759" />
           </TouchableOpacity>
         </View>
+        <ScopeToggle
+          scope={scope}
+          onChange={setScope}
+          nearbyModeLabel={
+            deviceLocationStatus === 'granted'
+              ? 'Ranked by live distance'
+              : myLocation
+                ? `Showing results near ${myLocation} (enable location for live distance)`
+                : 'Enable location access, or set your profile location'
+          }
+        />
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color="#94A3B8" style={styles.searchIcon} />
           <TextInput style={styles.searchInput} placeholder="Search businesses..." value={searchQuery} onChangeText={setSearchQuery} />
@@ -415,10 +468,27 @@ export default function BusinessScreen({ navigation, route }: any) {
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <View style={styles.emptyLayout}>
-              <Ionicons name="briefcase-outline" size={60} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No businesses found.</Text>
-            </View>
+            scope === 'home' && !myLocation ? (
+              <View style={styles.emptyLayout}>
+                <Ionicons name="location-outline" size={60} color="#CBD5E1" />
+                <Text style={styles.emptyText}>Set your location on your profile to see businesses at home.</Text>
+                <TouchableOpacity style={styles.setLocationButton} onPress={() => navigation.navigate('Profile', { session })}>
+                  <Text style={styles.setLocationButtonText}>Go to Profile</Text>
+                </TouchableOpacity>
+              </View>
+            ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
+              <View style={styles.emptyLayout}>
+                <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
+                <Text style={styles.emptyText}>Enable location access, or set your profile location, to see nearby businesses.</Text>
+              </View>
+            ) : (
+              <View style={styles.emptyLayout}>
+                <Ionicons name="briefcase-outline" size={60} color="#CBD5E1" />
+                <Text style={styles.emptyText}>
+                  {scope === 'home' ? `No businesses found at home in ${myLocation}.` : scope === 'nearby' ? 'No businesses found nearby.' : 'No businesses found.'}
+                </Text>
+              </View>
+            )
           }
         />
       )}
@@ -486,7 +556,21 @@ export default function BusinessScreen({ navigation, route }: any) {
               <View style={styles.halfInputRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.inputLabel}>Location</Text>
-                    <TextInput style={styles.inputField} placeholder="e.g. Schweizer-Reneke" value={newBiz.location} onChangeText={t => setNewBiz({...newBiz, location: t})} />
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <TextInput style={[styles.inputField, { flex: 1, marginRight: 8 }]} placeholder="e.g. Schweizer-Reneke" value={newBiz.location} onChangeText={t => setNewBiz({...newBiz, location: t})} />
+                      <TouchableOpacity
+                        style={styles.useLocationButton}
+                        disabled={capturingLocation}
+                        onPress={async () => {
+                          const captured = await captureLocation();
+                          if (captured) {
+                            setNewBiz({ ...newBiz, location: captured.label, latitude: captured.latitude, longitude: captured.longitude });
+                          }
+                        }}
+                      >
+                        {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={20} color="#34C759" />}
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
 
@@ -615,7 +699,11 @@ const styles = StyleSheet.create({
   messageButton: { flexDirection: 'row', backgroundColor: '#34C759', paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   messageButtonText: { fontSize: 15, fontWeight: '700', color: '#fff', marginLeft: 8 },
   emptyLayout: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 },
+  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
+  setLocationButton: { backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
+  setLocationButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '95%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },

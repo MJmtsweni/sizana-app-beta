@@ -1,16 +1,51 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { 
   StyleSheet, Text, View, FlatList, Image, 
   TouchableOpacity, TextInput, ActivityIndicator, 
   Dimensions, RefreshControl, Alert, Modal, ScrollView, KeyboardAvoidingView, Platform 
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import RatingModal from './RatingModal';
+import ListingDetailsModal from './ListingDetailsModal';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 40) / 2;
+
+// --- LISTING TYPE TABS ---
+const LISTING_TYPES: { key: string; label: string; icon: any }[] = [
+  { key: 'product', label: 'Products', icon: 'cube' },
+  { key: 'service', label: 'Services', icon: 'construct' },
+  { key: 'property', label: 'Property', icon: 'home' },
+  { key: 'vehicle', label: 'Vehicles', icon: 'car' },
+  { key: 'job', label: 'Jobs', icon: 'briefcase' },
+];
+
+// Sub-categories differ per listing type
+const CATEGORY_MAP: Record<string, string[]> = {
+  product: ['All', 'Farming', 'Electronics', 'Household', 'Fashion', 'Other'],
+  service: ['All', 'Home Services', 'Tutoring', 'Repairs', 'Beauty & Wellness', 'Other'],
+  property: ['All', 'For Sale', 'To Rent', 'Land', 'Commercial'],
+  vehicle: ['All', 'Cars', 'Bakkies & Trucks', 'Motorcycles', 'Parts & Accessories'],
+  job: ['All', 'Farm Work', 'Retail', 'Trades', 'Admin & Office', 'General Labour'],
+};
+
+const FAB_LABEL: Record<string, string> = {
+  product: 'Sell',
+  service: 'Offer',
+  property: 'List',
+  vehicle: 'Sell',
+  job: 'Post Job',
+};
+
+const PRICE_LABEL: Record<string, string> = {
+  product: 'Price (ZAR)',
+  service: 'Rate (ZAR)',
+  property: 'Price (ZAR)',
+  vehicle: 'Price (ZAR)',
+  job: 'Salary / Wage (ZAR)',
+};
 
 export default function MarketScreen({ route, session: directSession, navigation }: any) {
   const session = route?.params?.session || directSession;
@@ -20,54 +55,62 @@ export default function MarketScreen({ route, session: directSession, navigation
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
-  
+
+  // Type + category filter state
+  const [listingType, setListingType] = useState('product');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
   const [locationQuery, setLocationQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
 
   // Creation / Edit Modal States
   const [modalVisible, setModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newPrice, setNewPrice] = useState('');
-  const [newCategory, setNewCategory] = useState('Farming');
+  const [newCategory, setNewCategory] = useState(CATEGORY_MAP.product[1]);
   const [newLocation, setNewLocation] = useState('Schweizer-Reneke');
   const [newDescription, setNewDescription] = useState('');
   const [newImageUrl, setNewImageUrl] = useState('');
+  const [creatingListingType, setCreatingListingType] = useState('product');
 
   // Edit mode — holds the ID of the listing being edited, null when creating
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
 
+  // Business identity — only relevant when creatingListingType === 'job'
+  const [ownedBusinesses, setOwnedBusinesses] = useState<any[]>([]);
+  const [postingAsBusinessId, setPostingAsBusinessId] = useState<string | null>(null);
+
   // Details Sheet Modal States
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
-  
-  // PHASE 5: Follow Seller State
-  const [isFollowingSeller, setIsFollowingSeller] = useState(false);
 
-  const categories = ['All', 'Farming', 'Electronics', 'Vehicles', 'Business', 'Services'];
-  const creationCategories = ['Farming', 'Electronics', 'Vehicles', 'Business', 'Services'];
-  const [ratingModalVisible, setRatingModalVisible] = useState(false);
-
-  useEffect(() => {
-    fetchListings();
-  }, []);
+  // useFocusEffect (not a mount-only useEffect) so that ownedBusinesses stays
+  // current — e.g. if the user creates a business elsewhere and comes back to
+  // Market to post a job, this refetches instead of showing stale data.
+  useFocusEffect(
+    useCallback(() => {
+      fetchListings();
+      fetchUserBusinesses();
+    }, [session?.user?.id])
+  );
 
   async function fetchListings() {
     try {
       setLoading(true);
-       const { data, error } = await supabase
-      .from('market_items')
-      .select(`
-        id, title, description, price, category, image_url, location, created_at, seller_id,
-        users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified )
-      `)
-      .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('market_items')
+        .select(`
+          id, title, description, price, category, image_url, location, created_at, seller_id, listing_type, business_id,
+          users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
+          business:business_id ( id, name, logo_url, creator_id )
+        `)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       if (data) {
         setListings(data);
-        applyFilters(data, searchQuery, locationQuery, selectedCategory);
+        applyFilters(data, searchQuery, locationQuery, selectedCategory, listingType);
       }
     } catch (error: any) {
       Alert.alert('Marketplace Load Error', error.message);
@@ -77,8 +120,22 @@ export default function MarketScreen({ route, session: directSession, navigation
     }
   }
 
-  const applyFilters = (allData: any[], search: string, location: string, cat: string) => {
-    let temp = [...allData];
+  async function fetchUserBusinesses() {
+    if (!session?.user?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('id, name, logo_url')
+        .eq('creator_id', session.user.id);
+      if (error) throw error;
+      if (data) setOwnedBusinesses(data);
+    } catch (e: any) {
+      console.warn('Failed to fetch owned businesses:', e.message);
+    }
+  }
+
+  const applyFilters = (allData: any[], search: string, location: string, cat: string, type: string) => {
+    let temp = allData.filter(item => item.listing_type === type);
     if (cat !== 'All') temp = temp.filter(item => item.category === cat);
     if (search.trim() !== '') {
       temp = temp.filter(item => 
@@ -92,78 +149,16 @@ export default function MarketScreen({ route, session: directSession, navigation
     setFilteredListings(temp);
   };
 
-  // PHASE 5: Follow Status Check
-  async function checkFollowStatus(sellerId: string) {
-    if (!session?.user?.id || session.user.id === sellerId) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from('user_followers')
-        .select('id')
-        .match({ follower_id: session.user.id, following_id: sellerId })
-        .single();
-
-      if (data) setIsFollowingSeller(true);
-      else setIsFollowingSeller(false);
-    } catch (error) {
-      // Fails silently if no record is found (which means not following)
-      setIsFollowingSeller(false);
-    }
-  }
-
-  // PHASE 5: Handle Follow Action
-  const handleFollowSeller = async (sellerId: string, sellerName: string) => {
-    Alert.alert(
-      "Connect",
-      `Follow ${sellerName}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Follow", 
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('user_followers')
-                .insert({ 
-                  follower_id: session.user.id, 
-                  following_id: sellerId 
-                });
-                
-              if (error) throw error;
-              
-              setIsFollowingSeller(true);
-              Alert.alert("Success", `You are now following ${sellerName}.`);
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            }
-          } 
-        }
-      ]
-    );
-  };
-
-  // PHASE 5: Handle Navigating to Profile
-  const handleSellerProfilePress = () => {
-    if (!selectedItem) return;
-    setDetailsModalVisible(false); // Close the item modal first
-    
-    if (selectedItem.seller_id === session?.user?.id) {
-      navigation.navigate('Profile', { session });
-    } else {
-      // Pass a constructed user profile object to the PublicProfile screen
-      const userProfile = {
-        id: selectedItem.seller_id,
-        username: selectedItem.users?.username,
-        avatar_url: selectedItem.users?.avatar_url,
-      };
-      navigation.navigate('PublicProfile', { userProfile, session });
-    }
+  const handleSelectListingType = (type: string) => {
+    setListingType(type);
+    setSelectedCategory('All');
+    applyFilters(listings, searchQuery, locationQuery, 'All', type);
   };
 
   async function handlePickProductImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Sizana needs camera roll access to add product photos.');
+      Alert.alert('Permission Required', 'Sizana needs camera roll access to add photos.');
       return;
     }
 
@@ -185,9 +180,6 @@ export default function MarketScreen({ route, session: directSession, navigation
       const fileExt = localUri.split('.').pop()?.toLowerCase() || 'jpg';
       const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
 
-      const response = await fetch(localUri);
-      const blob = await response.blob();
-
       const formData = new FormData();
       formData.append('file', {
         uri: localUri,
@@ -206,7 +198,7 @@ export default function MarketScreen({ route, session: directSession, navigation
         .getPublicUrl(fileName);
 
       setNewImageUrl(publicUrl);
-      Alert.alert('Image Uploaded', 'Product photo staged successfully!');
+      Alert.alert('Image Uploaded', 'Photo staged successfully!');
     } catch (error: any) {
       Alert.alert('Upload Failed', error.message);
     } finally {
@@ -230,6 +222,8 @@ export default function MarketScreen({ route, session: directSession, navigation
         location: newLocation,
         description: newDescription,
         image_url: newImageUrl,
+        listing_type: creatingListingType,
+        business_id: creatingListingType === 'job' ? postingAsBusinessId : null,
       };
 
       if (editingItemId) {
@@ -246,7 +240,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           .insert({ ...payload, seller_id: session.user.id });
 
         if (error) throw error;
-        Alert.alert('Success', 'Your item is now live on the marketplace!');
+        Alert.alert('Success', 'Your listing is now live!');
       }
 
       setModalVisible(false);
@@ -263,26 +257,32 @@ export default function MarketScreen({ route, session: directSession, navigation
     setNewPrice('');
     setNewDescription('');
     setNewImageUrl('');
-    setNewCategory('Farming');
     setNewLocation('Schweizer-Reneke');
-    setEditingItemId(null); 
+    setEditingItemId(null);
+    setPostingAsBusinessId(null);
   };
 
-  const handleManageListing = () => {
-    if (!selectedItem) return;
+  const openCreateModal = () => {
+    setCreatingListingType(listingType);
+    setNewCategory(CATEGORY_MAP[listingType][1]);
+    setModalVisible(true);
+  };
 
+  const handleManageListing = (item: any) => {
     Alert.alert('Manage Listing', 'What would you like to do?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Edit',
         onPress: () => {
-          setNewTitle(selectedItem.title);
-          setNewPrice(String(selectedItem.price));
-          setNewDescription(selectedItem.description || '');
-          setNewLocation(selectedItem.location || 'Schweizer-Reneke');
-          setNewCategory(selectedItem.category);
-          setNewImageUrl(selectedItem.image_url || '');
-          setEditingItemId(selectedItem.id); 
+          setNewTitle(item.title);
+          setNewPrice(String(item.price));
+          setNewDescription(item.description || '');
+          setNewLocation(item.location || 'Schweizer-Reneke');
+          setNewCategory(item.category);
+          setNewImageUrl(item.image_url || '');
+          setEditingItemId(item.id);
+          setCreatingListingType(item.listing_type);
+          setPostingAsBusinessId(item.business_id || null);
 
           setDetailsModalVisible(false);
           setModalVisible(true);
@@ -295,7 +295,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           const { error } = await supabase
             .from('market_items')
             .delete()
-            .eq('id', selectedItem.id);
+            .eq('id', item.id);
 
           if (error) {
             Alert.alert('Delete Failed', error.message);
@@ -308,26 +308,6 @@ export default function MarketScreen({ route, session: directSession, navigation
     ]);
   };
 
-  const handleMessageSeller = () => {
-    if (!selectedItem) return;
-
-    if (selectedItem.seller_id === session?.user?.id) {
-      Alert.alert('Marketplace Rule', 'You cannot message yourself about your own product listing.');
-      return;
-    }
-
-    setDetailsModalVisible(false);
-    
-    // Pass the full selectedItem object as contextItem
-    navigation.navigate('Inbox', {
-      session: session,
-      sellerId: selectedItem.seller_id,
-      sellerName: selectedItem.users?.username || 'Sizana Member',
-      contextItem: selectedItem, 
-      itemId: selectedItem.id
-    });
-  };
-
   const formatCurrency = (amount: number) => `R ${Number(amount).toLocaleString('en-ZA')}`;
 
   const renderMarketItem = ({ item }: { item: any }) => (
@@ -336,8 +316,6 @@ export default function MarketScreen({ route, session: directSession, navigation
       activeOpacity={0.9}
       onPress={() => {
         setSelectedItem(item);
-        setIsFollowingSeller(false); // Reset state before checking
-        checkFollowStatus(item.seller_id); // Check if we follow this specific seller
         setDetailsModalVisible(true);
       }}
     >
@@ -352,10 +330,17 @@ export default function MarketScreen({ route, session: directSession, navigation
         <View style={styles.categoryBadge}>
           <Text style={styles.categoryBadgeText}>{item.category}</Text>
         </View>
+        {item.business_id && (
+          <View style={styles.businessBadge}>
+            <Ionicons name="briefcase" size={10} color="#fff" />
+          </View>
+        )}
       </View>
 
       <View style={styles.cardDetails}>
-        <Text style={styles.cardPrice}>{formatCurrency(item.price)}</Text>
+        <Text style={styles.cardPrice}>
+          {formatCurrency(item.price)}{item.listing_type === 'job' ? ' /mo' : ''}
+        </Text>
         <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
         <View style={styles.locationContainer}>
           <Ionicons name="location" size={12} color="#34C759" />
@@ -372,14 +357,37 @@ export default function MarketScreen({ route, session: directSession, navigation
 
   return (
     <View style={styles.mainContainer}>
+      {/* --- LISTING TYPE TABS --- */}
+      <View style={{ maxHeight: 54, marginTop: 10 }}>
+        <FlatList
+          data={LISTING_TYPES}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.typeTabsContainer}
+          keyExtractor={(item) => item.key}
+          renderItem={({ item }) => {
+            const active = listingType === item.key;
+            return (
+              <TouchableOpacity
+                style={[styles.typeTab, active && styles.typeTabActive]}
+                onPress={() => handleSelectListingType(item.key)}
+              >
+                <Ionicons name={item.icon} size={16} color={active ? '#fff' : '#475569'} style={{ marginRight: 6 }} />
+                <Text style={[styles.typeTabText, active && styles.typeTabTextActive]}>{item.label}</Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+
       <View style={styles.filterHeaderLayout}>
         <View style={[styles.searchBarContainer, { flex: 1, marginRight: 6 }]}>
           <Ionicons name="search" size={18} color="#94A3B8" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search marketplace..."
+            placeholder={`Search ${LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()}...`}
             value={searchQuery}
-            onChangeText={(t) => { setSearchQuery(t); applyFilters(listings, t, locationQuery, selectedCategory); }}
+            onChangeText={(t) => { setSearchQuery(t); applyFilters(listings, t, locationQuery, selectedCategory, listingType); }}
           />
         </View>
         <View style={[styles.searchBarContainer, { width: '38%', marginLeft: 6 }]}>
@@ -388,21 +396,22 @@ export default function MarketScreen({ route, session: directSession, navigation
             style={styles.searchInput}
             placeholder="Location..."
             value={locationQuery}
-            onChangeText={(t) => { setLocationQuery(t); applyFilters(listings, searchQuery, t, selectedCategory); }}
+            onChangeText={(t) => { setLocationQuery(t); applyFilters(listings, searchQuery, t, selectedCategory, listingType); }}
           />
         </View>
       </View>
 
       <View style={{ maxHeight: 50, marginBottom: 6 }}>
         <FlatList
-          data={categories}
+          data={CATEGORY_MAP[listingType]}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.categoriesContainer}
+          keyExtractor={(item) => item}
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[styles.categoryPill, selectedCategory === item && styles.categoryPillActive]}
-              onPress={() => { setSelectedCategory(item); applyFilters(listings, searchQuery, locationQuery, item); }}
+              onPress={() => { setSelectedCategory(item); applyFilters(listings, searchQuery, locationQuery, item, listingType); }}
             >
               <Text style={[styles.categoryText, selectedCategory === item && styles.categoryTextActive]}>{item}</Text>
             </TouchableOpacity>
@@ -416,6 +425,7 @@ export default function MarketScreen({ route, session: directSession, navigation
         <FlatList
           data={filteredListings}
           numColumns={2}
+          key={listingType}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderMarketItem}
           contentContainerStyle={styles.gridContainer}
@@ -424,15 +434,15 @@ export default function MarketScreen({ route, session: directSession, navigation
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="alert-circle-outline" size={50} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No listings found here.</Text>
+              <Text style={styles.emptyText}>No {LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()} found here.</Text>
             </View>
           }
         />
       )}
 
-      <TouchableOpacity style={styles.fab} activeOpacity={0.8} onPress={() => setModalVisible(true)}>
+      <TouchableOpacity style={styles.fab} activeOpacity={0.8} onPress={openCreateModal}>
         <Ionicons name="add" size={24} color="#fff" />
-        <Text style={styles.fabText}>Sell</Text>
+        <Text style={styles.fabText}>{FAB_LABEL[listingType]}</Text>
       </TouchableOpacity>
 
       <Modal
@@ -444,13 +454,41 @@ export default function MarketScreen({ route, session: directSession, navigation
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingItemId ? 'Edit Listing' : 'Create New Listing'}</Text>
+              <Text style={styles.modalTitle}>
+                {editingItemId ? 'Edit Listing' : `New ${LISTING_TYPES.find(t => t.key === creatingListingType)?.label.slice(0, -1)}`}
+              </Text>
               <TouchableOpacity onPress={() => { setModalVisible(false); clearForm(); }}>
                 <Ionicons name="close-circle" size={28} color="#64748B" />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+              {/* --- POST AS: only for Jobs, only if the user owns a business --- */}
+              {creatingListingType === 'job' && ownedBusinesses.length > 0 && (
+                <>
+                  <Text style={styles.fieldLabel}>Post As</Text>
+                  <View style={styles.identityRow}>
+                    <TouchableOpacity
+                      style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
+                      onPress={() => setPostingAsBusinessId(null)}
+                    >
+                      <Ionicons name="person" size={14} color={postingAsBusinessId === null ? '#34C759' : '#64748B'} />
+                      <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>Myself</Text>
+                    </TouchableOpacity>
+                    {ownedBusinesses.map((biz) => (
+                      <TouchableOpacity
+                        key={biz.id}
+                        style={[styles.identityPill, postingAsBusinessId === biz.id && styles.identityPillActive]}
+                        onPress={() => setPostingAsBusinessId(biz.id)}
+                      >
+                        <Ionicons name="briefcase" size={14} color={postingAsBusinessId === biz.id ? '#34C759' : '#64748B'} />
+                        <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>{biz.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
               <TouchableOpacity style={styles.modalImageSelector} onPress={handlePickProductImage}>
                 {newImageUrl ? (
                   <Image source={{ uri: newImageUrl }} style={styles.selectedProductImage} />
@@ -459,31 +497,31 @@ export default function MarketScreen({ route, session: directSession, navigation
                 ) : (
                   <>
                     <Ionicons name="camera" size={36} color="#94A3B8" />
-                    <Text style={styles.imageSelectorText}>Add Product Photo</Text>
+                    <Text style={styles.imageSelectorText}>Add Photo</Text>
                   </>
                 )}
               </TouchableOpacity>
 
-              <Text style={styles.fieldLabel}>Item Title</Text>
+              <Text style={styles.fieldLabel}>Title</Text>
               <TextInput style={styles.modalInput} value={newTitle} onChangeText={setNewTitle} placeholder="e.g., Yellow Maize Bags" />
 
-              <Text style={styles.fieldLabel}>Price (ZAR)</Text>
+              <Text style={styles.fieldLabel}>{PRICE_LABEL[creatingListingType]}</Text>
               <TextInput style={styles.modalInput} keyboardType="numeric" value={newPrice} onChangeText={setNewPrice} placeholder="e.g., 450" />
 
-              <Text style={styles.fieldLabel}>Trading Location</Text>
+              <Text style={styles.fieldLabel}>Location</Text>
               <TextInput style={styles.modalInput} value={newLocation} onChangeText={setNewLocation} placeholder="e.g., Schweizer-Reneke" />
 
               <Text style={styles.fieldLabel}>Category</Text>
               <View style={styles.modalCategoryRow}>
-                {creationCategories.map((cat) => (
+                {CATEGORY_MAP[creatingListingType].slice(1).map((cat) => (
                   <TouchableOpacity key={cat} style={[styles.modalCatPill, newCategory === cat && styles.modalCatPillActive]} onPress={() => setNewCategory(cat)}>
                     <Text style={[styles.modalCatText, newCategory === cat && styles.modalCatTextActive]}>{cat}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <Text style={styles.fieldLabel}>Item Description</Text>
-              <TextInput style={[styles.modalInput, styles.modalTextArea]} value={newDescription} onChangeText={setNewDescription} multiline numberOfLines={3} placeholder="Provide item details..." />
+              <Text style={styles.fieldLabel}>Description</Text>
+              <TextInput style={[styles.modalInput, styles.modalTextArea]} value={newDescription} onChangeText={setNewDescription} multiline numberOfLines={3} placeholder="Provide details..." />
 
               <TouchableOpacity style={styles.submitListingButton} onPress={handleCreateListing}>
                 <Text style={styles.submitButtonText}>{editingItemId ? 'Save Changes' : 'Publish Listing'}</Text>
@@ -493,147 +531,15 @@ export default function MarketScreen({ route, session: directSession, navigation
         </View>
       </Modal>
 
-      <RatingModal
-        visible={ratingModalVisible}
-        onClose={() => setRatingModalVisible(false)}
-        raterId={session?.user?.id}
-        rateeId={selectedItem?.seller_id}
-        rateeName={selectedItem?.users?.username || 'this seller'}
-        onSubmitted={fetchListings}
-      />        
-      
-      <Modal animationType="fade" transparent={true} visible={detailsModalVisible} onRequestClose={() => setDetailsModalVisible(false)}>
-        <View style={styles.detailsModalOverlay}>
-          <View style={styles.detailsModalContent}>
-            
-            <View style={styles.detailsHeaderActions}>
-              <TouchableOpacity style={styles.circularCloseButton} onPress={() => setDetailsModalVisible(false)}>
-                <Ionicons name="arrow-back" size={24} color="#1E293B" />
-              </TouchableOpacity>
-
-              <Text style={styles.detailsHeaderTitle}>Market Item</Text>
-
-              {selectedItem?.seller_id === session?.user?.id ? (
-                <TouchableOpacity
-                  style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
-                  onPress={handleManageListing}
-                >
-                  <Ionicons name="ellipsis-horizontal" size={24} color="#1E293B" />
-                </TouchableOpacity>
-              ) : (
-                <View style={{ width: 40 }} />
-              )}
-            </View>
-
-            {selectedItem && (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-                
-                <View style={styles.fullSizeImageFrame}>
-                  {selectedItem.image_url ? (
-                    <Image source={{ uri: selectedItem.image_url }} style={styles.fullProductImage} />
-                  ) : (
-                    <View style={styles.fullPlaceholderImage}>
-                      <Ionicons name="image-outline" size={80} color="#CBD5E1" />
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.detailsBodyTextWrapper}>
-                  <Text style={styles.detailsPriceText}>{formatCurrency(selectedItem.price)}</Text>
-                  <Text style={styles.detailsTitleText}>{selectedItem.title}</Text>
-                  
-                  <View style={styles.detailsMetaRow}>
-                    <View style={styles.metaBadgePill}>
-                      <Ionicons name="pricetag" size={12} color="#475569" style={{ marginRight: 4 }} />
-                      <Text style={styles.metaBadgeText}>{selectedItem.category}</Text>
-                    </View>
-                    <View style={styles.metaBadgePill}>
-                      <Ionicons name="location" size={12} color="#34C759" style={{ marginRight: 4 }} />
-                      <Text style={styles.metaBadgeText}>{selectedItem.location}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.dividerLine} />
-
-                  <Text style={styles.detailsSectionHeading}>Description</Text>
-                  <Text style={styles.detailsDescriptionBody}>{selectedItem.description || 'The seller did not include an item description summary.'}</Text>
-
-                  <View style={styles.dividerLine} />
-
-                  <Text style={styles.detailsSectionHeading}>Seller Profile Information</Text>
-                  
-                  {/* PHASE 5: Clickable Seller Profile Row with "+" Follow Button */}
-                  <View style={styles.sellerProfileLayoutRow}>
-                    <TouchableOpacity 
-                      style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
-                      activeOpacity={0.7}
-                      onPress={handleSellerProfilePress}
-                    >
-                      <View style={styles.sellerAvatarWrapper}>
-                        {selectedItem.users?.avatar_url ? (
-                          <Image source={{ uri: selectedItem.users.avatar_url }} style={styles.sellerAvatarImage} />
-                        ) : (
-                          <Ionicons name="person-circle" size={44} color="#CBD5E1" />
-                        )}
-                      </View>
-                      
-                      <View style={{ marginLeft: 12, flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={styles.sellerNameLabel}>{selectedItem.users?.username || 'Sizana Community Member'}</Text>
-                          
-                          {/* ONLY Follow option for Market Item Screen */}
-                          {selectedItem.seller_id !== session?.user?.id && !isFollowingSeller && (
-                            <TouchableOpacity 
-                              style={styles.plusButton} 
-                              onPress={() => handleFollowSeller(selectedItem.seller_id, selectedItem.users?.username || 'this seller')}
-                            >
-                              <Ionicons name="add" size={14} color="#fff" />
-                            </TouchableOpacity>
-                          )}
-                        </View>
-
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                          {selectedItem.users?.rating != null ? (
-                            <Text style={styles.sellerTierLabel}>⭐ {Number(selectedItem.users.rating).toFixed(1)}</Text>
-                          ) : (
-                            <Text style={styles.sellerTierLabelMuted}>New Member</Text>
-                          )}
-                          {selectedItem.users?.is_verified && (
-                            <Text style={[styles.sellerTierLabel, { marginLeft: 8 }]}>✓ Verified</Text>
-                          )}
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    {selectedItem.seller_id !== session?.user?.id && (
-                      <TouchableOpacity 
-                        style={{ marginTop: 4 }}
-                        onPress={() => {
-                          setDetailsModalVisible(false); 
-                          setTimeout(() => {
-                            setRatingModalVisible(true);
-                          }, 350); 
-                        }} 
-                      >
-                        <Text style={styles.rateSellerLink}>Rate this seller</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {selectedItem.seller_id !== session?.user?.id && (
-                    <TouchableOpacity style={styles.messageSellerActionButton} onPress={handleMessageSeller}>
-                      <Ionicons name="chatbubble-ellipses" size={20} color="#fff" style={{ marginRight: 8 }} />
-                      <Text style={styles.messageSellerButtonText}>Message Seller</Text>
-                    </TouchableOpacity>
-                  )}
-
-                </View>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-
+      <ListingDetailsModal
+        visible={detailsModalVisible}
+        item={selectedItem}
+        session={session}
+        navigation={navigation}
+        onClose={() => setDetailsModalVisible(false)}
+        onChanged={fetchListings}
+        onManage={handleManageListing}
+      />
     </View>
   );
 }
@@ -641,7 +547,14 @@ export default function MarketScreen({ route, session: directSession, navigation
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  filterHeaderLayout: { flexDirection: 'row', paddingHorizontal: 14, marginTop: 14, marginBottom: 4, alignItems: 'center' },
+
+  typeTabsContainer: { paddingHorizontal: 14, alignItems: 'center' },
+  typeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, marginRight: 8 },
+  typeTabActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
+  typeTabText: { fontSize: 13, fontWeight: '700', color: '#475569' },
+  typeTabTextActive: { color: '#fff' },
+
+  filterHeaderLayout: { flexDirection: 'row', paddingHorizontal: 14, marginTop: 10, marginBottom: 4, alignItems: 'center' },
   searchBarContainer: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', height: 46 },
   searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, height: '100%', fontSize: 14, color: '#334155', fontWeight: '500' },
@@ -658,6 +571,7 @@ const styles = StyleSheet.create({
   placeholderImage: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   categoryBadge: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   categoryBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  businessBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: '#8B5CF6', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
   cardDetails: { padding: 12 },
   cardPrice: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
   cardTitle: { fontSize: 14, color: '#475569', fontWeight: '600', marginTop: 2 },
@@ -684,32 +598,10 @@ const styles = StyleSheet.create({
   modalCatTextActive: { color: '#fff' },
   submitListingButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 10 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  
-  detailsModalOverlay: { flex: 1, backgroundColor: '#fff' },
-  detailsModalContent: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20 },
-  detailsHeaderActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, height: 50, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  circularCloseButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
-  detailsHeaderTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
-  fullSizeImageFrame: { width: width, height: height * 0.4, backgroundColor: '#F1F5F9' },
-  fullProductImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  fullPlaceholderImage: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  detailsBodyTextWrapper: { padding: 24 },
-  detailsPriceText: { fontSize: 26, fontWeight: '900', color: '#1E293B' },
-  detailsTitleText: { fontSize: 20, fontWeight: '700', color: '#475569', marginTop: 4, lineHeight: 26 },
-  detailsMetaRow: { flexDirection: 'row', marginTop: 12 },
-  metaBadgePill: { flexDirection: 'row', backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginRight: 8, alignItems: 'center' },
-  metaBadgeText: { fontSize: 12, color: '#475569', fontWeight: '700' },
-  dividerLine: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 20 },
-  detailsSectionHeading: { fontSize: 12, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  detailsDescriptionBody: { fontSize: 15, color: '#334155', fontWeight: '500', lineHeight: 24 },
-  sellerProfileLayoutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  sellerAvatarWrapper: { width: 46, height: 46, borderRadius: 16, backgroundColor: '#F1F5F9', overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0' },
-  sellerAvatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  sellerNameLabel: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  sellerTierLabel: { fontSize: 12, fontWeight: '600', color: '#34C759', marginTop: 1 },
-  messageSellerActionButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 32, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 3 },
-  messageSellerButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  sellerTierLabelMuted: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  rateSellerLink: { fontSize: 12, fontWeight: '700', color: '#3B82F6', marginTop: 4 },
-  plusButton: { backgroundColor: '#34C759', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+
+  identityRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
+  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#F8FAFC', borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
+  identityText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
+  identityTextActive: { color: '#34C759' },
 });

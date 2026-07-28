@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase'; 
 import EditBusinessModalScreen from './EditBusinessModalScreen';
+import ListingDetailsModal from './ListingDetailsModal';
 
 export default function BusinessProfileScreen({ navigation, route }: any) {
   const { business, session } = route.params;
@@ -22,8 +23,13 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
   const [currentBusiness, setCurrentBusiness] = useState(business);
   const [posts, setPosts] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [listings, setListings] = useState<any[]>([]);
   const [loadingContent, setLoadingContent] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // --- LISTING DETAILS MODAL STATE ---
+  const [selectedListing, setSelectedListing] = useState<any>(null);
+  const [listingDetailsVisible, setListingDetailsVisible] = useState(false);
 
   // --- REVIEW MODAL STATE ---
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
@@ -39,6 +45,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
   useEffect(() => {
     if (activeTab === 'Posts' && posts.length === 0) fetchBusinessPosts();
     if (activeTab === 'Events' && events.length === 0) fetchBusinessEvents();
+    if (activeTab === 'Jobs' && listings.length === 0) fetchBusinessListings();
   }, [activeTab]);
 
   // --- INTERACTIVE HANDLERS ---
@@ -112,6 +119,24 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
       .gte('event_date', new Date().toISOString())
       .order('event_date', { ascending: true });
     if (data) setEvents(data);
+    setLoadingContent(false);
+  };
+
+  // Business-posted listings are always Jobs (market_items enforces this via a
+  // DB constraint — business_id can only be set when listing_type = 'job'),
+  // so this doubles as "open positions" for the business.
+  const fetchBusinessListings = async () => {
+    setLoadingContent(true);
+    const { data } = await supabase
+      .from('market_items')
+      .select(`
+        id, title, description, price, category, image_url, location, created_at, seller_id, listing_type, business_id,
+        users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
+        business:business_id ( id, name, logo_url, creator_id )
+      `)
+      .eq('business_id', business.id)
+      .order('created_at', { ascending: false });
+    if (data) setListings(data);
     setLoadingContent(false);
   };
 
@@ -273,6 +298,40 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
     </View>
   );
 
+  const renderListingsTab = () => (
+    <View style={styles.tabContentContainer}>
+      {listings.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="briefcase-outline" size={48} color="#CBD5E1" />
+          <Text style={styles.emptyStateText}>No open positions right now.</Text>
+        </View>
+      ) : (
+        <View style={styles.listingsGrid}>
+          {listings.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.listingGridItem}
+              activeOpacity={0.9}
+              onPress={() => { setSelectedListing(item); setListingDetailsVisible(true); }}
+            >
+              <View style={styles.listingGridImageWrap}>
+                {item.image_url ? (
+                  <Image source={{ uri: item.image_url }} style={styles.listingGridImage} />
+                ) : (
+                  <Ionicons name="briefcase" size={32} color="#CBD5E1" />
+                )}
+              </View>
+              <View style={{ padding: 10 }}>
+                <Text style={styles.listingGridPrice}>R {Number(item.price).toLocaleString('en-ZA')} /mo</Text>
+                <Text style={styles.listingGridTitle} numberOfLines={1}>{item.title}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <View style={styles.mainContainer}>
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -344,7 +403,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
 
         {/* Tabs */}
         <View style={styles.tabsContainer}>
-          {['About', 'Gallery', 'Posts', 'Events'].map(tab => (
+          {['About', 'Gallery', 'Posts', 'Events', 'Jobs'].map(tab => (
             <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.activeTab]} onPress={() => setActiveTab(tab)}>
               <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
             </TouchableOpacity>
@@ -380,6 +439,9 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
                 <Text style={styles.eventTitle}>{e.title}</Text>
               </TouchableOpacity>
             ))
+          )}
+          {activeTab === 'Jobs' && (
+            loadingContent ? <ActivityIndicator color="#34C759" style={{ marginTop: 40 }} /> : renderListingsTab()
           )}
         </View>
       </ScrollView>
@@ -448,6 +510,15 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      <ListingDetailsModal
+        visible={listingDetailsVisible}
+        item={selectedListing}
+        session={session}
+        navigation={navigation}
+        onClose={() => setListingDetailsVisible(false)}
+        onChanged={fetchBusinessListings}
+      />
     </View>
   );
 }
@@ -511,6 +582,15 @@ const styles = StyleSheet.create({
     marginBottom: 12, borderWidth: 1, borderColor: '#DCFCE7'
   },
   eventTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 4 },
+  listingsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  listingGridItem: {
+    width: '48%', backgroundColor: '#fff', borderRadius: 16, marginBottom: 16,
+    overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0'
+  },
+  listingGridImageWrap: { width: '100%', height: 100, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  listingGridImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  listingGridPrice: { fontSize: 14, fontWeight: '800', color: '#1E293B' },
+  listingGridTitle: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 2 },
   fullScreenOverlay: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   fullScreenImage: { width: '100%', height: '100%' },
   closeImageButton: {

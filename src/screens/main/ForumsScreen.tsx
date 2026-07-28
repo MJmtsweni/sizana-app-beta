@@ -9,6 +9,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../lib/supabase';
+import { useUserLocation } from '../../hooks/useUserLocation';
+import { useDeviceLocation } from '../../hooks/useDeviceLocation';
+import { useLocationCapture } from '../../hooks/useLocationCapture';
+import { getDistanceKm, formatDistance } from '../../lib/distance';
+import ScopeToggle, { Scope } from '../../components/ScopeToggle';
 
 export default function ForumsScreen({ navigation, route, session: directSession }: any) {
   const session = route?.params?.session || directSession;
@@ -16,6 +21,14 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
   // Feed States
   const [posts, setPosts] = useState<any[]>([]);
+  const [scope, setScope] = useState<Scope>('explore');
+  const { coords: deviceCoords, status: deviceLocationStatus } = useDeviceLocation();
+  const { capturing: capturingLocation, captureLocation } = useLocationCapture();
+  const { myLocation } = useUserLocation(session);
+
+  React.useEffect(() => {
+    if (myLocation && !newLocation) setNewLocation(myLocation);
+  }, [myLocation]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -29,6 +42,9 @@ export default function ForumsScreen({ navigation, route, session: directSession
   const [newContent, setNewContent] = useState('');
   const [newTopic, setNewTopic] = useState('Parties & Celebrations');
   const [newTags, setNewTags] = useState(''); // PHASE 2: Tags
+  const [newLocation, setNewLocation] = useState('');
+  const [newLatitude, setNewLatitude] = useState<number | null>(null);
+  const [newLongitude, setNewLongitude] = useState<number | null>(null);
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -237,9 +253,9 @@ export default function ForumsScreen({ navigation, route, session: directSession
       }
 
       if (editingPostId) {
-        await supabase.from('forum_posts').update({ title: newTitle, content: newContent, topic: newTopic, tags: tagArray, media_url: finalMediaUrl, comments_disabled: disableComments, business_id: postingAsBusinessId }).eq('id', editingPostId);
+        await supabase.from('forum_posts').update({ title: newTitle, content: newContent, topic: newTopic, tags: tagArray, media_url: finalMediaUrl, comments_disabled: disableComments, business_id: postingAsBusinessId, location: newLocation.trim() || null, latitude: newLatitude, longitude: newLongitude }).eq('id', editingPostId);
       } else {
-        await supabase.from('forum_posts').insert({ author_id: session.user.id, business_id: postingAsBusinessId, title: newTitle, content: newContent, topic: newTopic, tags: tagArray, media_url: finalMediaUrl, comments_disabled: disableComments });
+        await supabase.from('forum_posts').insert({ author_id: session.user.id, business_id: postingAsBusinessId, title: newTitle, content: newContent, topic: newTopic, tags: tagArray, media_url: finalMediaUrl, comments_disabled: disableComments, location: newLocation.trim() || null, latitude: newLatitude, longitude: newLongitude });
       }
       setCreateModalVisible(false); clearForm(); fetchPosts();
     } catch (e: any) { Alert.alert("Publish Failed", e.message); } finally { setUploading(false); }
@@ -263,6 +279,9 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
   const clearForm = () => {
     setNewTitle(''); setNewContent(''); setMediaUri(null); setNewTags(''); setNewTopic('Parties & Celebrations'); setDisableComments(false); setEditingPostId(null); setPostingAsBusinessId(null);
+    setNewLocation(myLocation || '');
+    setNewLatitude(null);
+    setNewLongitude(null);
   };
 
   const handleProfilePress = (item: any) => {
@@ -326,6 +345,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
     <Text style={styles.postTopicBadge}>{item.topic}</Text>
     <Text style={styles.postDateText}> • {formatTimestamp(item.created_at)}</Text>
+    {item._distanceKm != null ? (
+      <Text style={styles.postDateText}> • {formatDistance(item._distanceKm)}</Text>
+    ) : item.location ? (
+      <Text style={styles.postDateText}> • {item.location}</Text>
+    ) : null}
   </View>
 </View>
           </TouchableOpacity>
@@ -375,6 +399,34 @@ export default function ForumsScreen({ navigation, route, session: directSession
     );
   }, [session]);
 
+  // Home: text-match against the poster's own saved location string (falls
+  // back to author/business location for any legacy post the SQL backfill missed).
+  // Nearby: real distance ranking using each post's own coordinates, when present;
+  // falls back to the Home-style text match if GPS is unavailable/denied.
+  let scopedPosts = posts;
+  if (scope === 'home') {
+    scopedPosts = myLocation
+      ? posts.filter((p) => {
+          const postLocation = p.location || (p.business_id ? p.business?.location : p.author?.location);
+          return postLocation?.toLowerCase().includes(myLocation.toLowerCase());
+        })
+      : [];
+  } else if (scope === 'nearby') {
+    if (deviceCoords) {
+      scopedPosts = posts
+        .filter((p) => p.latitude != null && p.longitude != null)
+        .map((p) => ({ ...p, _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, p.latitude, p.longitude) }))
+        .sort((a, b) => a._distanceKm - b._distanceKm);
+    } else if (myLocation) {
+      scopedPosts = posts.filter((p) => {
+        const postLocation = p.location || (p.business_id ? p.business?.location : p.author?.location);
+        return postLocation?.toLowerCase().includes(myLocation.toLowerCase());
+      });
+    } else {
+      scopedPosts = [];
+    }
+  }
+
   return (
     <View style={styles.mainContainer}>
       <View style={[styles.navPanel, { paddingTop: Math.max(insets.top, 45) }]}>
@@ -382,7 +434,56 @@ export default function ForumsScreen({ navigation, route, session: directSession
         <TouchableOpacity onPress={() => setCreateModalVisible(true)}><Ionicons name="create-outline" size={26} color="#34C759" /></TouchableOpacity>
       </View>
 
-      <FlatList data={posts} keyExtractor={(item) => String(item.id)} renderItem={renderPostCard} contentContainerStyle={{ padding: 16, paddingBottom: 100 }} onRefresh={() => { setRefreshing(true); fetchPosts(); }} refreshing={refreshing} />
+      <ScopeToggle
+        scope={scope}
+        onChange={setScope}
+        nearbyModeLabel={
+          deviceLocationStatus === 'granted'
+            ? 'Ranked by live distance'
+            : myLocation
+              ? `Showing results near ${myLocation} (enable location for live distance)`
+              : 'Enable location access, or set your profile location'
+        }
+      />
+
+      <FlatList
+        data={scopedPosts}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderPostCard}
+        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+        onRefresh={() => { setRefreshing(true); fetchPosts(); }}
+        refreshing={refreshing}
+        ListEmptyComponent={
+          scope === 'home' && !myLocation ? (
+            <View style={{ alignItems: 'center', marginTop: 80 }}>
+              <Ionicons name="location-outline" size={60} color="#CBD5E1" />
+              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+                Set your location on your profile to see posts at home.
+              </Text>
+              <TouchableOpacity
+                style={{ backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 }}
+                onPress={() => navigation.navigate('Profile', { session })}
+              >
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Go to Profile</Text>
+              </TouchableOpacity>
+            </View>
+          ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
+            <View style={{ alignItems: 'center', marginTop: 80 }}>
+              <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
+              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+                Enable location access, or set your profile location, to see nearby posts.
+              </Text>
+            </View>
+          ) : scope === 'home' || scope === 'nearby' ? (
+            <View style={{ alignItems: 'center', marginTop: 80 }}>
+              <Ionicons name="chatbubbles-outline" size={60} color="#CBD5E1" />
+              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+                No posts found {scope === 'home' ? `at home in ${myLocation}` : 'nearby'} yet.
+              </Text>
+            </View>
+          ) : null
+        }
+      />
 
       <Modal animationType="slide" transparent={true} visible={createModalVisible} onRequestClose={() => { setCreateModalVisible(false); clearForm(); }}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -399,6 +500,25 @@ export default function ForumsScreen({ navigation, route, session: directSession
                 )} />
                 <Text style={styles.inputLabel}>Title</Text>
                 <TextInput style={styles.titleInput} value={newTitle} onChangeText={setNewTitle} />
+                <Text style={styles.inputLabel}>Location</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TextInput style={[styles.titleInput, { flex: 1, marginRight: 8, marginBottom: 0 }]} value={newLocation} onChangeText={setNewLocation} placeholder="e.g. Ballito" />
+                  <TouchableOpacity
+                    style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' }}
+                    disabled={capturingLocation}
+                    onPress={async () => {
+                      const captured = await captureLocation();
+                      if (captured) {
+                        setNewLocation(captured.label);
+                        setNewLatitude(captured.latitude);
+                        setNewLongitude(captured.longitude);
+                      }
+                    }}
+                  >
+                    {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={18} color="#34C759" />}
+                  </TouchableOpacity>
+                </View>
+                <View style={{ height: 16 }} />
                 <Text style={styles.inputLabel}>Content</Text>
                 <TextInput style={styles.bodyInput} multiline value={newContent} onChangeText={setNewContent} />
                 <Text style={styles.inputLabel}>Tags (comma separated)</Text>

@@ -11,6 +11,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useUserLocation } from '../../hooks/useUserLocation';
+import { useDeviceLocation } from '../../hooks/useDeviceLocation';
+import { useLocationCapture } from '../../hooks/useLocationCapture';
+import { getDistanceKm, formatDistance } from '../../lib/distance';
+import ScopeToggle, { Scope } from '../../components/ScopeToggle';
 
 export default function EventsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
@@ -26,6 +31,10 @@ export default function EventsScreen({ navigation, route }: any) {
   const [activeTab, setActiveTab] = useState('Upcoming');
 
   const [showFilters, setShowFilters] = useState(false);
+  const [scope, setScope] = useState<Scope>('explore');
+  const { myLocation } = useUserLocation(session);
+  const { coords: deviceCoords, status: deviceLocationStatus } = useDeviceLocation();
+  const { capturing: capturingLocation, captureLocation } = useLocationCapture();
   const [searchLocation, setSearchLocation] = useState('');
   const [searchCategory, setSearchCategory] = useState('All');
   const [searchDate, setSearchDate] = useState('');
@@ -39,6 +48,8 @@ export default function EventsScreen({ navigation, route }: any) {
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newLocation, setNewLocation] = useState('Schweizer-Reneke');
+  const [newLatitude, setNewLatitude] = useState<number | null>(null);
+  const [newLongitude, setNewLongitude] = useState<number | null>(null);
   const [newCategory, setNewCategory] = useState('Community');
   const [newDate, setNewDate] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -63,7 +74,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
   React.useEffect(() => {
     applyFilters();
-  }, [searchLocation, searchCategory, searchDate, allEvents, activeTab]);
+  }, [searchLocation, searchCategory, searchDate, allEvents, activeTab, scope, myLocation, deviceCoords]);
 
   async function fetchUserBusinesses() {
     if (!session?.user?.id) return;
@@ -120,6 +131,29 @@ export default function EventsScreen({ navigation, route }: any) {
     result = result.filter(e => 
       !e.is_private || e.creator_id === session?.user?.id || e.isAttending
     );
+
+    if (scope === 'home') {
+      if (!myLocation) {
+        setFilteredEvents([]);
+        return;
+      }
+      result = result.filter(e => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
+    } else if (scope === 'nearby') {
+      if (deviceCoords) {
+        result = result
+          .filter(e => e.latitude != null && e.longitude != null)
+          .map(e => ({
+            ...e,
+            _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, e.latitude, e.longitude),
+          }))
+          .sort((a, b) => a._distanceKm - b._distanceKm);
+      } else if (myLocation) {
+        result = result.filter(e => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
+      } else {
+        setFilteredEvents([]);
+        return;
+      }
+    }
 
     if (activeTab === 'Upcoming') {
       result = result.filter(e => !e.isPast);
@@ -259,6 +293,8 @@ export default function EventsScreen({ navigation, route }: any) {
         title: newTitle,
         description: newDescription,
         location: newLocation,
+        latitude: newLatitude,
+        longitude: newLongitude,
         category: newCategory,
         image_url: finalImageUrl,
         event_date: combinedDateTime.toISOString(),
@@ -268,6 +304,8 @@ export default function EventsScreen({ navigation, route }: any) {
       if (error) throw error;
 
       setModalVisible(false);
+      setNewLatitude(null);
+      setNewLongitude(null);
       setNewTitle('');
       setNewDescription('');
       setNewDate('');
@@ -362,6 +400,9 @@ export default function EventsScreen({ navigation, route }: any) {
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={16} color="#64748B" />
             <Text style={styles.infoText}>{item.location}</Text>
+            {item._distanceKm != null && (
+              <Text style={styles.distanceBadge}>· {formatDistance(item._distanceKm)}</Text>
+            )}
           </View>
 
           <Text style={styles.eventDescription} numberOfLines={2}>{item.description}</Text>
@@ -407,6 +448,18 @@ export default function EventsScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
       </View>
+
+      <ScopeToggle
+        scope={scope}
+        onChange={setScope}
+        nearbyModeLabel={
+          deviceLocationStatus === 'granted'
+            ? 'Ranked by live distance'
+            : myLocation
+              ? `Showing results near ${myLocation} (enable location for live distance)`
+              : 'Enable location access, or set your profile location'
+        }
+      />
 
       {showFilters && (
         <View style={styles.filterTrayContainer}>
@@ -455,10 +508,27 @@ export default function EventsScreen({ navigation, route }: any) {
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <View style={styles.emptyLayout}>
-              <Ionicons name="calendar-clear-outline" size={60} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No events match your criteria.</Text>
-            </View>
+            scope === 'home' && !myLocation ? (
+              <View style={styles.emptyLayout}>
+                <Ionicons name="location-outline" size={60} color="#CBD5E1" />
+                <Text style={styles.emptyText}>Set your location on your profile to see events at home.</Text>
+                <TouchableOpacity style={styles.setLocationButton} onPress={() => navigation.navigate('Profile', { session })}>
+                  <Text style={styles.setLocationButtonText}>Go to Profile</Text>
+                </TouchableOpacity>
+              </View>
+            ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
+              <View style={styles.emptyLayout}>
+                <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
+                <Text style={styles.emptyText}>Enable location access, or set your profile location, to see nearby events.</Text>
+              </View>
+            ) : (
+              <View style={styles.emptyLayout}>
+                <Ionicons name="calendar-clear-outline" size={60} color="#CBD5E1" />
+                <Text style={styles.emptyText}>
+                  {scope === 'home' ? `No events found at home in ${myLocation}.` : scope === 'nearby' ? 'No events found nearby.' : 'No events match your criteria.'}
+                </Text>
+              </View>
+            )
           }
         />
       )}
@@ -552,7 +622,23 @@ export default function EventsScreen({ navigation, route }: any) {
                 </View>
 
                 <Text style={styles.inputLabel}>Location</Text>
-                <TextInput style={styles.inputField} placeholder="Venue or Address" value={newLocation} onChangeText={setNewLocation} />
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TextInput style={[styles.inputField, { flex: 1, marginRight: 8 }]} placeholder="Venue or Address" value={newLocation} onChangeText={setNewLocation} />
+                  <TouchableOpacity
+                    style={styles.useLocationButton}
+                    disabled={capturingLocation}
+                    onPress={async () => {
+                      const captured = await captureLocation();
+                      if (captured) {
+                        setNewLocation(captured.label);
+                        setNewLatitude(captured.latitude);
+                        setNewLongitude(captured.longitude);
+                      }
+                    }}
+                  >
+                    {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={20} color="#34C759" />}
+                  </TouchableOpacity>
+                </View>
 
                 <Text style={styles.inputLabel}>Description</Text>
                 <TextInput style={[styles.inputField, { height: 100, textAlignVertical: 'top' }]} multiline placeholder="What should people know?" value={newDescription} onChangeText={setNewDescription} />
@@ -676,7 +762,11 @@ const styles = StyleSheet.create({
   rsvpText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
   rsvpTextActive: { color: '#fff' },
   emptyLayout: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 },
+  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
+  setLocationButton: { backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
+  setLocationButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: '#fff', borderTopLeftRadius: 28,

@@ -13,7 +13,10 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Allow Sizana to access your location to connect you with nearby drivers and coordinate your transport."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +25,11 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.anonymous.sizanaapp",
-      "softwareKeyboardLayoutMode": "resize"
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

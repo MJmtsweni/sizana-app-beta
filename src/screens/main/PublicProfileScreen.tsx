@@ -7,15 +7,29 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import ListingDetailsModal from './ListingDetailsModal';
 
 const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 48) / 2;
+
+// Mirrors the listing_type values used in MarketScreen
+const LISTING_TYPE_TABS: { key: string; label: string; icon: any }[] = [
+  { key: 'All', label: 'All', icon: 'apps' },
+  { key: 'product', label: 'Products', icon: 'cube' },
+  { key: 'service', label: 'Services', icon: 'construct' },
+  { key: 'property', label: 'Property', icon: 'home' },
+  { key: 'vehicle', label: 'Vehicles', icon: 'car' },
+  { key: 'job', label: 'Jobs', icon: 'briefcase' },
+];
 
 export default function PublicProfileScreen({ route, navigation }: any) {
   const { userProfile, session } = route.params;
   const insets = useSafeAreaInsets();
 
   const [activeTab, setActiveTab] = useState<'Posts' | 'Listings'>('Posts');
+  const [listingTypeFilter, setListingTypeFilter] = useState('All');
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+  const [selectedListing, setSelectedListing] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,7 +122,7 @@ if (userProfile?.interests) {
         })));
       }
 
-      // Fetch User's Marketplace Listings
+      // Fetch User's Marketplace Listings (all types — filtered client-side by the sub-tabs below)
       const { data: listingsData, error: listingsError } = await supabase
         .from('market_items')
         .select('*')
@@ -228,27 +242,42 @@ if (userProfile?.interests) {
     </TouchableOpacity>
   );
 
-  const renderListingCard = ({ item }: { item: any }) => (
-    <TouchableOpacity 
-      style={styles.listingCard} 
-      activeOpacity={0.9} 
-      onPress={() => {
-        Alert.alert("Item", item.title); 
-      }}
-    >
-      <View style={styles.listingImageContainer}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.listingImage} />
-        ) : (
-          <Ionicons name="image-outline" size={40} color="#CBD5E1" />
-        )}
-      </View>
-      <View style={styles.listingDetails}>
-        <Text style={styles.listingPrice}>R {Number(item.price).toLocaleString('en-ZA')}</Text>
-        <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
-      </View>
-    </TouchableOpacity>
-  );
+  const renderListingCard = ({ item }: { item: any }) => {
+    const typeInfo = LISTING_TYPE_TABS.find(t => t.key === item.listing_type);
+    return (
+      <TouchableOpacity 
+        style={styles.listingCard} 
+        activeOpacity={0.9} 
+        onPress={() => {
+          setSelectedListing(item);
+          setDetailsModalVisible(true);
+        }}
+      >
+        <View style={styles.listingImageContainer}>
+          {item.image_url ? (
+            <Image source={{ uri: item.image_url }} style={styles.listingImage} />
+          ) : (
+            <Ionicons name="image-outline" size={40} color="#CBD5E1" />
+          )}
+          {typeInfo && (
+            <View style={styles.listingTypeBadge}>
+              <Ionicons name={typeInfo.icon} size={10} color="#fff" />
+            </View>
+          )}
+        </View>
+        <View style={styles.listingDetails}>
+          <Text style={styles.listingPrice}>
+            R {Number(item.price).toLocaleString('en-ZA')}{item.listing_type === 'job' ? ' /mo' : ''}
+          </Text>
+          <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const filteredListings = listingTypeFilter === 'All'
+    ? listings
+    : listings.filter(item => item.listing_type === listingTypeFilter);
 
   return (
     <View style={styles.mainContainer}>
@@ -262,7 +291,7 @@ if (userProfile?.interests) {
       </View>
 
       <FlatList
-        data={activeTab === 'Posts' ? posts : listings}
+        data={activeTab === 'Posts' ? posts : filteredListings}
         keyExtractor={(item) => item.id}
         renderItem={activeTab === 'Posts' ? renderPostCard : renderListingCard}
         numColumns={activeTab === 'Listings' ? 2 : 1}
@@ -352,6 +381,29 @@ if (userProfile?.interests) {
                 <Text style={[styles.tabText, activeTab === 'Listings' && styles.activeTabText]}>Marketplace</Text>
               </TouchableOpacity>
             </View>
+
+            {/* LISTING TYPE SUB-TABS — only relevant once the Marketplace tab is active */}
+            {activeTab === 'Listings' && (
+              <FlatList
+                data={LISTING_TYPE_TABS}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.subTypeTabsContainer}
+                keyExtractor={(item) => item.key}
+                renderItem={({ item }) => {
+                  const active = listingTypeFilter === item.key;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.subTypeTab, active && styles.subTypeTabActive]}
+                      onPress={() => setListingTypeFilter(item.key)}
+                    >
+                      <Ionicons name={item.icon} size={13} color={active ? '#fff' : '#64748B'} style={{ marginRight: 5 }} />
+                      <Text style={[styles.subTypeTabText, active && styles.subTypeTabTextActive]}>{item.label}</Text>
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
           </View>
         }
         ListEmptyComponent={
@@ -361,11 +413,24 @@ if (userProfile?.interests) {
             <View style={styles.emptyState}>
               <Ionicons name={activeTab === 'Posts' ? "chatbubbles-outline" : "pricetag-outline"} size={48} color="#CBD5E1" />
               <Text style={styles.emptyStateText}>
-                No {activeTab === 'Posts' ? 'posts' : 'listings'} available yet.
+                {activeTab === 'Posts' 
+                  ? 'No posts available yet.' 
+                  : listingTypeFilter === 'All' 
+                    ? 'No listings available yet.' 
+                    : `No ${LISTING_TYPE_TABS.find(t => t.key === listingTypeFilter)?.label.toLowerCase()} yet.`}
               </Text>
             </View>
           )
         }
+      />
+
+      <ListingDetailsModal
+        visible={detailsModalVisible}
+        item={selectedListing}
+        session={session}
+        navigation={navigation}
+        onClose={() => setDetailsModalVisible(false)}
+        onChanged={fetchUserContent}
       />
     </View>
   );
@@ -410,6 +475,12 @@ const styles = StyleSheet.create({
   activeTab: { borderBottomWidth: 2, borderBottomColor: '#34C759' },
   tabText: { fontSize: 14, fontWeight: '600', color: '#94A3B8' },
   activeTabText: { color: '#34C759', fontWeight: '800' },
+
+  subTypeTabsContainer: { paddingTop: 14, paddingBottom: 2, alignItems: 'center' },
+  subTypeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, marginRight: 8 },
+  subTypeTabActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
+  subTypeTabText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  subTypeTabTextActive: { color: '#fff' },
   
   postCard: { backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
   postTopicBadge: { fontSize: 11, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase' },
@@ -423,6 +494,7 @@ const styles = StyleSheet.create({
   listingCard: { backgroundColor: '#fff', width: COLUMN_WIDTH, borderRadius: 16, marginBottom: 16, marginHorizontal: 4, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0' },
   listingImageContainer: { width: '100%', height: COLUMN_WIDTH, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   listingImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  listingTypeBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(30,41,59,0.7)', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   listingDetails: { padding: 12 },
   listingPrice: { fontSize: 15, fontWeight: '800', color: '#1E293B' },
   listingTitle: { fontSize: 13, color: '#64748B', fontWeight: '500', marginTop: 2 },
