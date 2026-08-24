@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { withRetry } from '../../lib/network';
 
 export default function InboxScreen({ route, navigation, session: directSession }: any) {
   const session = route?.params?.session || directSession || route?.params?.params?.session;
@@ -91,8 +92,10 @@ export default function InboxScreen({ route, navigation, session: directSession 
           setActiveContextItem(incomingChat.contextItem);
         }
 
-        // Pre-fill only for new marketplace listing inquiries
-        if (isMarketplace && incomingChat.contextItem) {
+        // Pre-fill only when this is a fresh buyer-initiated inquiry (from
+        // ListingDetailsModal) — not when a seller is reopening an existing
+        // thread from a notification, where this text would be nonsensical.
+        if (isMarketplace && incomingChat.contextItem && incomingChat.isNewInquiry) {
           setNewMessage(`Hi ${incomingChat.sellerName}, is "${incomingChat.contextItem.title}" still available?`);
         }
 
@@ -191,7 +194,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
       setLoading(true);
       if (!session?.user?.id) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await withRetry(() => supabase
         .from('messages')
         .select(`
           id, content, created_at, sender_id, receiver_id, is_read, item_id, business_id,
@@ -199,7 +202,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
           receiver:receiver_id ( id, username, avatar_url )
         `)
         .or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
 
       if (error) throw error;
       if (!data) return;
@@ -348,13 +351,25 @@ export default function InboxScreen({ route, navigation, session: directSession 
 
       setMessages((prev) => prev.map(m => m.id === tempId ? data : m));
 
-      const { error: notifError } = await supabase.from('notifications').insert({
+      // Distinguish where the message came from so the notification center
+      // (and push copy) doesn't label every DM a "business inquiry" — only
+      // messages sent from a business page or a marketplace listing are.
+      const notifType =
+        activeBusinessId && activeBusinessId !== 'undefined' ? 'business_inquiry' :
+        activeItemId && activeItemId !== 'undefined' ? 'market_inquiry' :
+        'message';
+
+      const notifPayload: any = {
         actor_id: session.user.id,
         receiver_id: activeChatPartner,
-        type: 'message',
-        target_id: session.user.id, 
+        type: notifType,
+        target_id: session.user.id,
         is_read: false,
-      });
+      };
+      if (notifType === 'business_inquiry') notifPayload.business_id = activeBusinessId;
+      if (notifType === 'market_inquiry') notifPayload.item_id = activeItemId;
+
+      const { error: notifError } = await supabase.from('notifications').insert(notifPayload);
       if (notifError) console.error('Message notification error:', notifError.message);
       
     } catch (error: any) {

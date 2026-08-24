@@ -10,6 +10,8 @@ import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUserLocation } from '../../hooks/useUserLocation';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
@@ -95,7 +97,7 @@ export default function EventsScreen({ navigation, route }: any) {
     try {
       if (!refreshing) setLoading(true);
       
-      const { data, error } = await supabase
+      const { data, error } = await withRetry(() => supabase
         .from('events')
         .select(`
           *,
@@ -103,7 +105,7 @@ export default function EventsScreen({ navigation, route }: any) {
           business:business_id ( * ),
           rsvps:event_rsvps ( user_id )
         `)
-        .order('event_date', { ascending: true });
+        .order('event_date', { ascending: true }));
 
       if (error) throw error;
 
@@ -277,10 +279,11 @@ export default function EventsScreen({ navigation, route }: any) {
       let finalImageUrl = null;
 
       if (imageUri) {
-        const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressed = await compressImage(imageUri, { maxDimension: 1600 });
+        const fileExt = 'jpg';
         const fileName = `event-${Date.now()}.${fileExt}`;
         const formData = new FormData();
-        formData.append('file', { uri: imageUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressed.uri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
         if (uploadError) throw uploadError;
         const { data: { publicUrl } } = supabase.storage.from('Listings').getPublicUrl(fileName);

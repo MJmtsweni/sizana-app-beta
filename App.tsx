@@ -1,8 +1,14 @@
 import * as Linking from 'expo-linking';
 import 'react-native-url-polyfill/auto';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { LogBox } from 'react-native';
-import { NavigationContainer, useNavigation, LinkingOptions } from '@react-navigation/native';
+import * as SplashScreen from 'expo-splash-screen';
+import AnimatedSplash from './src/components/AnimatedSplash';
+
+// Keep the native splash (static, per app.json) up until we know whether
+// there's a session — prevents a flash of blank white before auth resolves.
+SplashScreen.preventAutoHideAsync().catch(() => {});
+import { NavigationContainer, useNavigation, LinkingOptions, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import BusinessProfileScreen from './src/screens/main/BusinessProfileScreen';
@@ -22,11 +28,16 @@ import ForumsScreen from './src/screens/main/ForumsScreen';
 import BusinessScreen from './src/screens/main/BusinessScreen';
 import EventsScreen from './src/screens/main/EventsScreen';
 import ProfileScreenDefault from './src/screens/main/ProfileScreen';
-import ChatScreen from './src/screens/main/ChatScreen';
 import InboxScreen from './src/screens/main/InboxScreen';
 import ThreadScreen from './src/screens/main/ThreadScreen';
 import NotificationsScreen from './src/screens/main/NotificationsScreen';
 import EventDetailScreen from './src/screens/main/EventDetailScreen';
+import { useAppFonts, colors } from './src/theme';
+import { ToastProvider, useToast, OfflineBanner } from './src/components/ui';
+import { registerAndSavePushToken, addNotificationListeners } from './src/lib/notifications';
+import { playNotificationSound } from './src/lib/sound';
+import { haptics } from './src/lib/haptics';
+import { withRetry } from './src/lib/network';
 
 const ProfileScreen = ProfileScreenDefault as React.ComponentType<any>;
 
@@ -65,6 +76,9 @@ function MainTabs({ session }: any) {
 
   return (
     <Tab.Navigator
+      screenListeners={{
+        tabPress: () => haptics.selection(),
+      }}
       screenOptions={({ route }) => ({
         tabBarIcon: ({ color, size }) => {
           let iconName: any;
@@ -75,8 +89,8 @@ function MainTabs({ session }: any) {
           else if (route.name === 'Profile') iconName = 'person';
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#34C759',
-        tabBarInactiveTintColor: 'gray',
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.textTertiary,
         headerShown: route.name !== 'Profile',
         header: () => <AppHeader session={session} variant="main" displayName={displayName} avatarUri={avatarUri} />,
       })}
@@ -118,13 +132,57 @@ const linking: LinkingOptions<any> = {
   },
 };
 
+const navigationRef = createNavigationContainerRef<any>();
+
+function NotificationBridge({ session }: { session: Session | null }) {
+  const { show } = useToast();
+
+  // Register (or refresh) this device's push token whenever a session
+  // becomes available — no-ops safely if push isn't configured yet (see
+  // src/lib/notifications.ts).
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    registerAndSavePushToken(session.user.id);
+  }, [session?.user?.id]);
+
+  // Foreground: surface a toast + sound instead of relying on the OS banner,
+  // which some Android OEMs suppress while the app is focused. Tapping a
+  // notification (foreground or from the tray) deep-links to the Notifications screen.
+  useEffect(() => {
+    const remove = addNotificationListeners({
+      onReceived: (notification) => {
+        const title = notification.request.content.title || 'New notification';
+        show({ message: title, type: 'info' });
+        playNotificationSound();
+      },
+      onResponse: () => {
+        if (navigationRef.isReady()) {
+          navigationRef.navigate('Notifications', { session });
+        }
+      },
+    });
+    return remove;
+  }, [session, show]);
+
+  return null;
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
+  const fontsLoaded = useAppFonts();
 
   useEffect(() => {
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
+      try {
+        // Boot-time call — worth a couple of retries so a flaky connection
+        // during app launch doesn't drop straight to the logged-out screen.
+        const { data: { session } } = await withRetry(() => supabase.auth.getSession());
+        setSession(session);
+      } finally {
+        setAuthResolved(true);
+      }
     };
 
     checkSession();
@@ -140,8 +198,32 @@ export default function App() {
     };
   }, []);
 
+  // The moment auth is resolved, hand off from the native splash to our
+  // AnimatedSplash — it renders on top of the same blank frame, so there's
+  // no flash of empty white in between the two.
+  useEffect(() => {
+    if (authResolved && fontsLoaded) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [authResolved, fontsLoaded]);
+
+  const handleAnimationFinish = useCallback(() => {
+    setShowAnimatedSplash(false);
+  }, []);
+
+  if (!authResolved || !fontsLoaded) {
+    return null; // native splash is still showing — nothing to render yet
+  }
+
+  if (showAnimatedSplash) {
+    return <AnimatedSplash onFinish={handleAnimationFinish} />;
+  }
+
   return (
-    <NavigationContainer linking={linking}>
+    <ToastProvider>
+      <OfflineBanner />
+      <NotificationBridge session={session} />
+      <NavigationContainer ref={navigationRef} linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Dashboard">
         {session && session.user ? (
           <>
@@ -155,15 +237,6 @@ export default function App() {
             <Stack.Screen name="Main">
               {(props) => <MainTabs {...props} session={session} />}
             </Stack.Screen>
-
-            <Stack.Screen
-              name="Chat"
-              component={ChatScreen}
-              options={({ route }: any) => ({
-                headerShown: true,
-                title: route.params?.receiverName || 'Chat'
-              })}
-            />
 
             <Stack.Screen
               name="Inbox"
@@ -214,6 +287,7 @@ export default function App() {
           </>
         )}
       </Stack.Navigator>
-    </NavigationContainer>
+      </NavigationContainer>
+    </ToastProvider>
   );
 }

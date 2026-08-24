@@ -6,13 +6,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from '@react-navigation/native';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
 export default function NotificationsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
-  
+
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -38,27 +43,65 @@ export default function NotificationsScreen({ navigation, route }: any) {
     return () => { supabase.removeChannel(channel); };
   }, [session?.user?.id]);
 
+  // Always re-fetches from page 0 (pull-to-refresh, tab focus, a new
+  // notification arriving via realtime) — loadMore is the only path that
+  // appends instead of replacing.
   const fetchNotifications = async () => {
     if (!session?.user?.id) return;
     try {
       if (!refreshing) setLoading(true);
-      
-      const { data, error } = await supabase
+
+      const [from, to] = pageRange(0);
+      const { data, error } = await withRetry(() => supabase
         .from('notifications')
         .select(`
           *,
           actor:actor_id ( username, avatar_url )
         `)
         .eq('receiver_id', session.user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .range(from, to));
 
       if (error) throw error;
-      if (data) setNotifications(data);
+      if (data) {
+        setNotifications(data);
+        setPage(0);
+        setHasMore(data.length === PAGE_SIZE);
+      }
     } catch (e: any) {
       console.error("Notifications fetch error:", e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const loadMoreNotifications = async () => {
+    if (!session?.user?.id || loadingMore || !hasMore || loading) return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const [from, to] = pageRange(nextPage);
+      const { data, error } = await withRetry(() => supabase
+        .from('notifications')
+        .select(`
+          *,
+          actor:actor_id ( username, avatar_url )
+        `)
+        .eq('receiver_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .range(from, to));
+
+      if (error) throw error;
+      if (data) {
+        setNotifications(prev => [...prev, ...data]);
+        setPage(nextPage);
+        setHasMore(data.length === PAGE_SIZE);
+      }
+    } catch (e: any) {
+      console.error("Notifications load-more error:", e.message);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -138,7 +181,51 @@ export default function NotificationsScreen({ navigation, route }: any) {
           navigation.navigate('BusinessProfile', { business: bizData, session });
         }
       } else if (item.type === 'message') {
-        navigation.navigate('Inbox', { session });
+        // Safe to deep-link straight into the thread: a personal DM only
+        // exists between users who already passed the friendship gate.
+        navigation.navigate('Inbox', {
+          session,
+          sellerId: item.actor_id,
+          sellerName: item.actor?.username,
+          sellerAvatar: item.actor?.avatar_url,
+        });
+      } else if (item.type === 'business_inquiry') {
+        // The friendship gate in InboxScreen is bypassed by passing a
+        // businessName — fetch it so we can deep-link straight into the thread.
+        const { data: bizData } = await supabase
+          .from('businesses')
+          .select('id, name')
+          .eq('id', item.business_id)
+          .single();
+
+        navigation.navigate('Inbox', {
+          session,
+          sellerId: item.actor_id,
+          sellerName: item.actor?.username,
+          sellerAvatar: item.actor?.avatar_url,
+          businessId: item.business_id,
+          businessName: bizData?.name || 'Business',
+        });
+      } else if (item.type === 'market_inquiry') {
+        // The friendship gate is bypassed by passing a contextItem — fetch
+        // the listing so we can deep-link straight into the thread.
+        const { data: itemData } = await supabase
+          .from('market_items')
+          .select('*')
+          .eq('id', item.item_id)
+          .single();
+
+        navigation.navigate('Inbox', {
+          session,
+          sellerId: item.actor_id,
+          sellerName: item.actor?.username,
+          sellerAvatar: item.actor?.avatar_url,
+          itemId: item.item_id,
+          // Always pass a truthy contextItem, even if the listing was since
+          // deleted — InboxScreen's friendship-gate bypass keys off its
+          // presence, not its contents.
+          contextItem: itemData || { title: 'Listing' },
+        });
       } else if (item.type === 'review') {
         const { data: bizData } = await supabase
           .from('businesses')
@@ -201,7 +288,9 @@ export default function NotificationsScreen({ navigation, route }: any) {
       case 'comment': return { icon: 'chatbubble' as const, badgeColor: '#3B82F6', message: 'commented on your discussion.' };
       case 'follow': return { icon: 'person-add' as const, badgeColor: '#8B5CF6', message: 'started following your business.' };
       case 'rsvp': return { icon: 'calendar' as const, badgeColor: '#F59E0B', message: 'is attending your event.' };
-      case 'message': return { icon: 'chatbubble-ellipses' as const, badgeColor: '#34C759', message: 'sent a new business inquiry.' };  
+      case 'message': return { icon: 'chatbubble-ellipses' as const, badgeColor: '#34C759', message: 'sent you a message.' };
+      case 'business_inquiry': return { icon: 'briefcase' as const, badgeColor: '#3B82F6', message: 'sent your business a new inquiry.' };
+      case 'market_inquiry': return { icon: 'pricetag' as const, badgeColor: '#F59E0B', message: 'asked about your listing.' };
       case 'review': return { icon: 'star' as const, badgeColor: '#F59E0B', message: 'left a review on your business.' };
       case 'seller_review': return { icon: 'pricetag' as const, badgeColor: '#F97316', message: 'rated you as a marketplace seller.' };
       case 'user_follow': return { icon: 'person-add' as const, badgeColor: '#8B5CF6', message: 'started following you.' };
@@ -276,6 +365,9 @@ export default function NotificationsScreen({ navigation, route }: any) {
           onRefresh={() => { setRefreshing(true); fetchNotifications(); }}
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreNotifications}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
               <Ionicons name="notifications-off-outline" size={60} color="#CBD5E1" />

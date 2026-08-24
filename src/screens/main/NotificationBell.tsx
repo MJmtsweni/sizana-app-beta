@@ -3,6 +3,9 @@ import { TouchableOpacity, View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { colors } from '../../theme';
+import { haptics } from '../../lib/haptics';
+import { playNotificationSound } from '../../lib/sound';
 
 export default function NotificationBell({ session }: { session: any }) {
   const navigation = useNavigation<any>();
@@ -37,7 +40,13 @@ export default function NotificationBell({ session }: { session: any }) {
         schema: 'public',
         table: 'notifications',
         filter: `receiver_id=eq.${session.user.id}`
-      }, () => fetchUnreadCount())
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          haptics.tap();
+          playNotificationSound();
+        }
+        fetchUnreadCount();
+      })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -54,8 +63,10 @@ export default function NotificationBell({ session }: { session: any }) {
     <TouchableOpacity
       style={styles.container}
       onPress={() => navigation.navigate('Notifications', { session })}
+      accessibilityRole="button"
+      accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
     >
-      <Ionicons name="notifications-outline" size={26} color="#34C759" />
+      <Ionicons name="notifications-outline" size={26} color={colors.brand} />
       {unreadCount > 0 && <View style={styles.badge} />}
     </TouchableOpacity>
   );
@@ -73,8 +84,8 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#EF4444',
+    backgroundColor: colors.danger,
     borderWidth: 1.5,
-    borderColor: '#fff',
+    borderColor: colors.white,
   },
 });

@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from './AppHeader';
+import { withRetry } from '../../lib/network';
 
 function normalizeEvent(events: any) {
   if (!events) return null;
@@ -29,25 +30,40 @@ export default function DashboardScreen({ navigation, route }: any) {
 
     async function fetchDashboardEvent() {
       try {
-        const { data: rsvpData } = await supabase
+        const nowIso = new Date().toISOString();
+
+        // 1. Nearest UPCOMING event the user RSVP'd to — !inner so the
+        // event_date filter/order below actually apply to the joined table,
+        // not just the rsvp row itself. Previously this had no date filter
+        // and no ordering, so .limit(1) could return any RSVP at random —
+        // including ones for events that already happened.
+        const { data: rsvpData } = await withRetry(() => supabase
           .from('event_rsvps')
-          .select('event_id, events(*)')
+          .select('event_id, events!inner(*)')
           .eq('user_id', session.user.id)
-          .limit(1);
+          .gte('events.event_date', nowIso)
+          .order('event_date', { foreignTable: 'events', ascending: true })
+          .limit(1));
 
         if (rsvpData?.length && rsvpData[0].events) {
           setFeaturedEvent(normalizeEvent(rsvpData[0].events));
           return;
         }
 
-        const { data: publicData } = await supabase
+        // 2. Fallback: nearest upcoming public event (same missing-filter bug existed here too)
+        const { data: publicData } = await withRetry(() => supabase
           .from('events')
           .select('*')
           .eq('is_private', false)
+          .gte('event_date', nowIso)
           .order('event_date', { ascending: true })
-          .limit(1);
+          .limit(1));
 
-        if (publicData?.length) setFeaturedEvent(normalizeEvent(publicData[0]));
+        if (publicData?.length) {
+          setFeaturedEvent(normalizeEvent(publicData[0]));
+        } else {
+          setFeaturedEvent(null);
+        }
       } catch (e: any) {
         console.error("Dashboard event fetch error:", e.message);
       }

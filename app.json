@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Allow Sizana to access your location to connect you with nearby drivers and coordinate your transport."
+        "NSLocationWhenInUseUsageDescription": "Allow Sizana to access your location so we can show you nearby listings, businesses, events, and forum activity."
       }
     },
     "android": {
@@ -28,14 +28,42 @@
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#34C759",
+      "androidMode": "default"
+    },
     "plugins": [
-      "@react-native-community/datetimepicker"
-    ]
+      "@react-native-community/datetimepicker",
+      "expo-audio",
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#34C759",
+          "sounds": [
+            "./assets/sounds/notification.wav"
+          ]
+        }
+      ],
+      "react-native-compressor",
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0c6ac0a1-81a8-402e-93f2-3c66e695cb8d"
+      }
+    },
+    "owner": "tmtsweni"
   }
 }

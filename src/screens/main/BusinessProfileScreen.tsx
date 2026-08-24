@@ -130,7 +130,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
     const { data } = await supabase
       .from('market_items')
       .select(`
-        id, title, description, price, category, image_url, location, created_at, seller_id, listing_type, business_id,
+        id, title, description, price, category, image_url, image_urls, location, created_at, seller_id, listing_type, business_id,
         users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
         business:business_id ( id, name, logo_url, creator_id )
       `)
@@ -315,8 +315,8 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
               onPress={() => { setSelectedListing(item); setListingDetailsVisible(true); }}
             >
               <View style={styles.listingGridImageWrap}>
-                {item.image_url ? (
-                  <Image source={{ uri: item.image_url }} style={styles.listingGridImage} />
+                {(item.image_urls?.[0] || item.image_url) ? (
+                  <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.listingGridImage} />
                 ) : (
                   <Ionicons name="briefcase" size={32} color="#CBD5E1" />
                 )}
@@ -337,7 +337,13 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Cover Photo */}
         <View style={styles.coverPhotoContainer}>
-          <Image source={{ uri: currentBusiness.cover_photo_url }} style={styles.coverPhoto} />
+          {currentBusiness.cover_photo_url ? (
+            <Image source={{ uri: currentBusiness.cover_photo_url }} style={styles.coverPhoto} />
+          ) : (
+            <View style={[styles.coverPhoto, styles.coverPhotoPlaceholder]}>
+              <Ionicons name="image-outline" size={36} color="#CBD5E1" />
+            </View>
+          )}
           <TouchableOpacity style={[styles.backButton, { top: Math.max(insets.top, 20) }]} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -346,13 +352,19 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
         {/* Profile Meta */}
         <View style={styles.profileMetaContainer}>
           <View style={styles.logoWrapper}>
-            <Image source={{ uri: currentBusiness.logo_url }} style={styles.logoImage} />
+            {currentBusiness.logo_url ? (
+              <Image source={{ uri: currentBusiness.logo_url }} style={styles.logoImage} />
+            ) : (
+              <Ionicons name="briefcase" size={32} color="#CBD5E1" />
+            )}
           </View>
           <Text style={styles.businessName}>{currentBusiness.name}</Text>
-          <Text style={styles.categoryText}>{currentBusiness.category} • {followerCount} Followers</Text>
+          <Text style={styles.categoryText}>
+            {currentBusiness.category} • {followerCount} {followerCount === 1 ? 'Follower' : 'Followers'}
+          </Text>
 
-          {/* Action Bar */}
-          <View style={styles.actionBar}>
+          {/* Primary actions — Follow/Edit and Message get real room to breathe */}
+          <View style={styles.primaryActionRow}>
             {session?.user?.id !== currentBusiness.creator_id ? (
               <TouchableOpacity
                 style={[styles.actionButton, isFollowing ? styles.buttonFollowing : styles.buttonPrimary]}
@@ -371,24 +383,28 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
 
             {session?.user?.id !== currentBusiness.creator_id && (
               <TouchableOpacity
-    style={[styles.actionButton, styles.buttonPrimary, { flex: 0.9 }]}
-    onPress={() =>
-      navigation.navigate('Inbox', { // Updated to match your working route
-        sellerId: currentBusiness.creator_id,
-        sellerName: currentBusiness.name,
-        sellerAvatar: currentBusiness.logo_url || null,
-        businessId: currentBusiness.id,
-        businessName: currentBusiness.name,
-        itemId: currentBusiness.id,
-        itemTitle: currentBusiness.name,
-        session: session,
-      })
-    }
-  >
-    <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
-    <Text style={styles.actionButtonText}>Message</Text>
-  </TouchableOpacity>
+                style={[styles.actionButton, styles.buttonPrimary]}
+                onPress={() =>
+                  navigation.navigate('Inbox', {
+                    sellerId: currentBusiness.creator_id,
+                    sellerName: currentBusiness.name,
+                    sellerAvatar: currentBusiness.logo_url || null,
+                    businessId: currentBusiness.id,
+                    businessName: currentBusiness.name,
+                    itemId: currentBusiness.id,
+                    itemTitle: currentBusiness.name,
+                    session: session,
+                  })
+                }
+              >
+                <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
+                <Text style={styles.actionButtonText}>Message</Text>
+              </TouchableOpacity>
             )}
+          </View>
+
+          {/* Secondary actions — quick-contact icons, one clear row of their own */}
+          <View style={styles.secondaryActionRow}>
             <TouchableOpacity style={styles.iconButton} onPress={() => setReviewModalVisible(true)}>
               <Ionicons name="star" size={20} color="#F59E0B" />
             </TouchableOpacity>
@@ -527,6 +543,7 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#fff' },
   coverPhotoContainer: { width: '100%', height: 180, position: 'relative' },
   coverPhoto: { width: '100%', height: '100%', resizeMode: 'cover' },
+  coverPhotoPlaceholder: { backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   backButton: {
     position: 'absolute', left: 16, width: 40, height: 40, borderRadius: 20,
     backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center'
@@ -541,10 +558,12 @@ const styles = StyleSheet.create({
   logoImage: { width: '100%', height: '100%', borderRadius: 13, resizeMode: 'cover' },
   businessName: { fontSize: 24, fontWeight: '800', color: '#1E293B', marginTop: 12 },
   categoryText: { fontSize: 14, color: '#64748B', marginTop: 4, fontWeight: '500' },
-  actionBar: {
-    flexDirection: 'row', alignItems: 'center',
-    marginTop: 16, paddingBottom: 16,
-    borderBottomWidth: 1, borderBottomColor: '#F1F5F9'
+  primaryActionRow: {
+    flexDirection: 'row', alignItems: 'center', marginTop: 16,
+  },
+  secondaryActionRow: {
+    flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
   },
   actionButton: {
     flex: 1, flexDirection: 'row', height: 44, borderRadius: 22,
@@ -554,7 +573,7 @@ const styles = StyleSheet.create({
   buttonFollowing: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
   buttonSecondary: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' },
   actionButtonText: { color: '#fff', fontSize: 15, fontWeight: '700', marginLeft: 6 },
-  iconButton: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   tabsContainer: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   tab: { flex: 1, paddingVertical: 16, alignItems: 'center' },
   activeTab: { borderBottomWidth: 2, borderBottomColor: '#34C759' },

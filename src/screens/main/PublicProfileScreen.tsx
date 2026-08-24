@@ -23,8 +23,30 @@ const LISTING_TYPE_TABS: { key: string; label: string; icon: any }[] = [
 ];
 
 export default function PublicProfileScreen({ route, navigation }: any) {
-  const { userProfile, session } = route.params;
+  const { userProfile, session } = route.params || {};
   const insets = useSafeAreaInsets();
+
+  // Whoever navigated here passed a missing/undefined profile — fail gracefully
+  // instead of crashing on userProfile.id below. This can't fully replace fixing
+  // the actual caller, but it means a bad navigation call degrades to an error
+  // screen instead of a hard crash, no matter which screen the tap came from.
+  if (!userProfile || !userProfile.id) {
+    return (
+      <View style={styles.mainContainer}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 45) }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#1E293B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Public Profile</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.emptyState}>
+          <Ionicons name="person-remove-outline" size={48} color="#CBD5E1" />
+          <Text style={styles.emptyStateText}>This profile isn't available right now.</Text>
+        </View>
+      </View>
+    );
+  }
 
   const [activeTab, setActiveTab] = useState<'Posts' | 'Listings'>('Posts');
   const [listingTypeFilter, setListingTypeFilter] = useState('All');
@@ -254,8 +276,8 @@ if (userProfile?.interests) {
         }}
       >
         <View style={styles.listingImageContainer}>
-          {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.listingImage} />
+          {(item.image_urls?.[0] || item.image_url) ? (
+            <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.listingImage} />
           ) : (
             <Ionicons name="image-outline" size={40} color="#CBD5E1" />
           )}

@@ -8,6 +8,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, fontFamily } from '../../theme';
+import { haptics } from '../../lib/haptics';
+import { compressImage } from '../../lib/mediaCompression';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -64,16 +67,19 @@ export default function SignUpScreen({ navigation }: any) {
       Alert.alert("Select Region", "Please select at least one region.");
       return;
     }
+    haptics.tap();
     animateLayout();
     setStep(step + 1);
   };
 
   const prevStep = () => {
+    haptics.tap();
     animateLayout();
     setStep(step - 1);
   };
 
   const toggleRegion = (city: string) => {
+    haptics.selection();
     animateLayout();
     if (selectedRegions.includes(city)) {
       setSelectedRegions(prev => prev.filter(r => r !== city));
@@ -87,6 +93,7 @@ export default function SignUpScreen({ navigation }: any) {
   };
 
   const toggleInterest = (topic: string) => {
+    haptics.selection();
     animateLayout();
     if (selectedInterests.includes(topic)) {
       setSelectedInterests(prev => prev.filter(t => t !== topic));
@@ -133,11 +140,12 @@ export default function SignUpScreen({ navigation }: any) {
 
       // 2. If a session is returned and an avatar was picked, upload it instantly
       if (authData.session && avatarUri) {
-        const fileExt = avatarUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressed = await compressImage(avatarUri, { maxDimension: 800 });
+        const fileExt = 'jpg';
         const fileName = `${authData.user?.id}-${Date.now()}.${fileExt}`;
-        
+
         const formData = new FormData();
-        formData.append('file', { uri: avatarUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressed.uri, name: fileName, type: `image/${fileExt}` } as any);
         
         const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, formData);
         
@@ -323,43 +331,43 @@ export default function SignUpScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.background },
   scrollContainer: { flexGrow: 1, paddingBottom: 40 },
   innerContainer: { flex: 1, padding: 24, paddingTop: 20 },
-  
+
   progressDock: { flexDirection: 'row', justifyContent: 'center', position: 'absolute', left: 0, right: 0, zIndex: 10 },
-  progressDot: { width: 30, height: 4, borderRadius: 2, backgroundColor: '#E2E8F0', marginHorizontal: 4 },
-  progressDotActive: { backgroundColor: '#34C759' },
+  progressDot: { width: 30, height: 4, borderRadius: 2, backgroundColor: colors.border, marginHorizontal: 4 },
+  progressDotActive: { backgroundColor: colors.brand },
 
   stepContainer: { flex: 1 },
   backNav: { marginBottom: 16, alignSelf: 'flex-start', padding: 4 },
-  header: { fontSize: 28, fontWeight: '800', color: '#1E293B', marginBottom: 8 },
-  subtitle: { fontSize: 15, color: '#64748B', marginBottom: 24, lineHeight: 22 },
-  
+  header: { fontSize: 28, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 8 },
+  subtitle: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: 24, lineHeight: 22 },
+
   avatarSection: { alignItems: 'center', marginBottom: 24 },
   avatarWrapper: { position: 'relative' },
-  avatarPlaceholder: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#F1F5F9', borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center' },
+  avatarPlaceholder: { width: 100, height: 100, borderRadius: 50, backgroundColor: colors.slate[100], borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center' },
   avatarImage: { width: 100, height: 100, borderRadius: 50 },
-  avatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: '#34C759', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
-  avatarText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginTop: 10 },
+  avatarBadge: { position: 'absolute', bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: colors.brand, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.white },
+  avatarText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginTop: 10 },
 
-  label: { fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 8, marginLeft: 4 },
-  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 16, borderRadius: 12, fontSize: 15, color: '#1E293B', marginBottom: 20 },
-  
-  primaryButton: { flexDirection: 'row', backgroundColor: '#34C759', padding: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginTop: 12, shadowColor: '#34C759', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  
+  label: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.slate[600], marginBottom: 8, marginLeft: 4 },
+  input: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, padding: 16, borderRadius: 12, fontSize: 15, fontFamily: fontFamily.regular, color: colors.textPrimary, marginBottom: 20 },
+
+  primaryButton: { flexDirection: 'row', backgroundColor: colors.brand, padding: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginTop: 12, shadowColor: colors.brand, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  primaryButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
+
   footerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 32 },
-  footerText: { color: '#64748B', fontSize: 14, fontWeight: '500' },
-  loginLink: { color: '#34C759', fontSize: 14, fontWeight: '700' },
+  footerText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.medium },
+  loginLink: { color: colors.brand, fontSize: 14, fontFamily: fontFamily.bold },
 
-  selectionCountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  selectionCountText: { fontSize: 14, fontWeight: '700', color: '#3B82F6' },
-  provinceHeader: { fontSize: 14, fontWeight: '800', color: '#1E293B', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 },
-  
+  selectionCountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
+  selectionCountText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.accent },
+  provinceHeader: { fontSize: 14, fontFamily: fontFamily.extrabold, color: colors.textPrimary, textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 },
+
   pillContainer: { flexDirection: 'row', flexWrap: 'wrap' },
-  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  pillActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  pillText: { fontSize: 14, fontWeight: '600', color: '#475569' },
-  pillTextActive: { color: '#fff' }
+  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
+  pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  pillText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600] },
+  pillTextActive: { color: colors.white }
 });

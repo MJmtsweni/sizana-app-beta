@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
   TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
@@ -15,6 +15,11 @@ import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
 import { getDistanceKm, formatDistance } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
+import { compressImage } from '../../lib/mediaCompression';
+import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
+import EditBusinessModalScreen from './EditBusinessModalScreen';
 
 export default function BusinessScreen({ navigation, route }: any) {
   const session = route?.params?.session;
@@ -22,11 +27,22 @@ export default function BusinessScreen({ navigation, route }: any) {
   const [openTime, setOpenTime] = useState(new Date(new Date().setHours(8, 0, 0, 0))); // Defaults to 08:00
   const [closeTime, setCloseTime] = useState(new Date(new Date().setHours(17, 0, 0, 0))); // Defaults to 17:00
 
+  // Full, unfiltered table — only fetched (and only needed) for the Home/Nearby
+  // scopes, which rank by location match / live distance over the whole set
+  // client-side. Explore scope never touches this; it's paginated separately
+  // below since it doesn't need the full dataset in memory.
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [filteredBusinesses, setFilteredBusinesses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
+
+  // Explore scope's own paginated, server-filtered dataset.
+  const [exploreBusinesses, setExploreBusinesses] = useState<any[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const isFirstExploreFilterRun = useRef(true);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [scope, setScope] = useState<Scope>('explore');
@@ -35,8 +51,8 @@ export default function BusinessScreen({ navigation, route }: any) {
   const { capturing: capturingLocation, captureLocation } = useLocationCapture();
   
   // Excluded 'All' from the registration form choices to prevent users from creating an 'All' business
-  const filterCategories = ['All', 'Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
-  const formCategories = ['Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
+  const filterCategories = ['All', ...BUSINESS_CATEGORIES];
+  const formCategories = BUSINESS_CATEGORIES;
 
   const [modalVisible, setModalVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -69,19 +85,91 @@ export default function BusinessScreen({ navigation, route }: any) {
   const [galleryLabel, setGalleryLabel] = useState('');
   const [uploadingGallery, setUploadingGallery] = useState(false);
 
+  // Business being edited via the card's "Manage Business" menu
+  const [editingBusiness, setEditingBusiness] = useState<any>(null);
+
+  // Dispatches to whichever fetch backs the currently active scope — used
+  // on focus and after any mutation (create/delete/gallery add) so both
+  // paths stay a single source of truth for "refresh what's on screen now".
+  function refreshBusinesses() {
+    if (scope === 'explore') fetchExploreBusinesses();
+    else fetchBusinesses();
+  }
+
   useFocusEffect(
-    useCallback(() => { fetchBusinesses(); }, [])
+    useCallback(() => { refreshBusinesses(); }, [scope])
   );
 
   React.useEffect(() => { applyFilters(); }, [searchQuery, activeCategory, businesses, scope, myLocation, deviceCoords]);
 
+  // Explore's search/category filters are applied server-side (unlike
+  // Home/Nearby, which filter the full in-memory `businesses` array above),
+  // so a change re-fetches page 0 instead of re-filtering locally. Debounced
+  // so search-as-you-type doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (scope !== 'explore') return;
+    if (isFirstExploreFilterRun.current) {
+      isFirstExploreFilterRun.current = false;
+      return;
+    }
+    const handle = setTimeout(() => { fetchExploreBusinesses(); }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, activeCategory]);
+
+  function buildExploreBusinessesQuery() {
+    let query = supabase.from('businesses').select('*, gallery:business_gallery(*)');
+    if (activeCategory !== 'All') query = query.eq('category', activeCategory);
+    if (searchQuery.trim()) query = query.ilike('name', `%${searchQuery.trim()}%`);
+    return query.order('created_at', { ascending: false });
+  }
+
+  async function fetchExploreBusinesses() {
+    try {
+      if (exploreBusinesses.length === 0) setLoading(true);
+      const [from, to] = pageRange(0);
+      const { data, error } = await withRetry(() => buildExploreBusinessesQuery().range(from, to));
+      if (error) throw error;
+      if (data) {
+        setExploreBusinesses(data);
+        setPage(0);
+        setHasMore(data.length === PAGE_SIZE);
+      }
+    } catch (e: any) {
+      console.error('Explore businesses fetch error:', e.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  async function loadMoreExploreBusinesses() {
+    if (loadingMore || !hasMore || loading || scope !== 'explore') return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const [from, to] = pageRange(nextPage);
+      const { data, error } = await withRetry(() => buildExploreBusinessesQuery().range(from, to));
+      if (error) throw error;
+      if (data) {
+        setExploreBusinesses(prev => [...prev, ...data]);
+        setPage(nextPage);
+        setHasMore(data.length === PAGE_SIZE);
+      }
+    } catch (e: any) {
+      console.error('Explore businesses load-more error:', e.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   async function fetchBusinesses() {
     try {
       if (!refreshing) setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await withRetry(() => supabase
         .from('businesses')
         .select('*, gallery:business_gallery(*)')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
 
       if (error) throw error;
       if (data) {
@@ -193,10 +281,11 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       // 1. Upload Logo if exists
       if (newBiz.logoUri) {
-        const fileExt = newBiz.logoUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressedLogo = await compressImage(newBiz.logoUri, { maxDimension: 800 });
+        const fileExt = 'jpg';
         const fileName = `biz-${Date.now()}.${fileExt}`;
         const formData = new FormData();
-        formData.append('file', { uri: newBiz.logoUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressedLogo.uri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
@@ -205,10 +294,11 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       // 2. Upload Cover Photo if exists
       if (newBiz.coverPhotoUri) {
-        const fileExt = newBiz.coverPhotoUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressedCover = await compressImage(newBiz.coverPhotoUri, { maxDimension: 1600 });
+        const fileExt = 'jpg';
         const fileName = `cover-${Date.now()}.${fileExt}`;
         const formData = new FormData();
-        formData.append('file', { uri: newBiz.coverPhotoUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressedCover.uri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
@@ -240,8 +330,8 @@ export default function BusinessScreen({ navigation, route }: any) {
       }
 
       setModalVisible(false);
-      fetchBusinesses();
-      
+      refreshBusinesses();
+
       // Full Form Reset
       setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', website_url: '', logoUri: null, coverPhotoUri: null, latitude: null, longitude: null });
       setOpenTime(new Date(new Date().setHours(8, 0, 0, 0)));
@@ -258,10 +348,11 @@ export default function BusinessScreen({ navigation, route }: any) {
     if (!galleryImageUri || !activeBusinessId) return;
     try {
       setUploadingGallery(true);
-      const fileExt = galleryImageUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const compressedGalleryImage = await compressImage(galleryImageUri, { maxDimension: 1600 });
+      const fileExt = 'jpg';
       const fileName = `gallery-${Date.now()}.${fileExt}`;
       const formData = new FormData();
-      formData.append('file', { uri: galleryImageUri, name: fileName, type: `image/${fileExt}` } as any);
+      formData.append('file', { uri: compressedGalleryImage.uri, name: fileName, type: `image/${fileExt}` } as any);
       
       const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
       if (uploadError) throw uploadError;
@@ -275,7 +366,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       setGalleryModalVisible(false);
       setGalleryImageUri(null);
       setGalleryLabel('');
-      fetchBusinesses(); 
+      refreshBusinesses();
     } catch (e: any) {
       Alert.alert('Upload Failed', e.message);
     } finally {
@@ -288,7 +379,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
           await supabase.from('businesses').delete().eq('id', bizId);
-          fetchBusinesses();
+          refreshBusinesses();
       }}
     ]);
   };
@@ -331,6 +422,7 @@ export default function BusinessScreen({ navigation, route }: any) {
             onPress={() => {
               Alert.alert("Manage Business", "What would you like to do?", [
                 { text: "Cancel", style: "cancel" },
+                { text: "Edit", onPress: () => setEditingBusiness(item) },
                 { text: "Delete Listing", style: "destructive", onPress: () => handleDeleteBusiness(item.id) }
               ]);
             }}
@@ -460,13 +552,16 @@ export default function BusinessScreen({ navigation, route }: any) {
         <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
       ) : (
         <FlatList
-          data={filteredBusinesses}
+          data={scope === 'explore' ? exploreBusinesses : filteredBusinesses}
           keyExtractor={(item) => item.id}
           renderItem={renderBusinessCard}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-          onRefresh={() => { setRefreshing(true); fetchBusinesses(); }}
+          onRefresh={() => { setRefreshing(true); refreshBusinesses(); }}
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
+          onEndReached={scope === 'explore' ? loadMoreExploreBusinesses : undefined}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={scope === 'explore' && loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <View style={styles.emptyLayout}>
@@ -657,6 +752,15 @@ export default function BusinessScreen({ navigation, route }: any) {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {editingBusiness && (
+        <EditBusinessModalScreen
+          visible={!!editingBusiness}
+          business={editingBusiness}
+          onClose={() => setEditingBusiness(null)}
+          onUpdate={fetchBusinesses}
+        />
+      )}
     </View>
   );
 }

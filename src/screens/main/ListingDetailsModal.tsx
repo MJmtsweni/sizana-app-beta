@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  View, Text, StyleSheet, Image, TouchableOpacity, Modal, ScrollView, 
+  View, Text, StyleSheet, Image, TouchableOpacity, Modal, ScrollView, FlatList,
   Dimensions, Alert, Platform 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,11 +38,13 @@ export default function ListingDetailsModal({
   const [isFollowingSeller, setIsFollowingSeller] = useState(false);
   const [isFollowingBusiness, setIsFollowingBusiness] = useState(false);
   const [ratingModalVisible, setRatingModalVisible] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
 
   useEffect(() => {
     if (visible && item) {
       setIsFollowingSeller(false);
       setIsFollowingBusiness(false);
+      setActiveImageIndex(0);
       checkFollowStatus(item);
     }
   }, [visible, item?.id]);
@@ -174,12 +176,17 @@ export default function ListingDetailsModal({
       businessId: isBusinessPost ? item.business.id : undefined,
       contextItem: item,
       itemId: item.id,
+      isNewInquiry: true,
     });
   };
 
   const formatCurrency = (amount: number) => `R ${Number(amount).toLocaleString('en-ZA')}`;
 
   if (!item) return null;
+
+  // Falls back to the legacy single image_url for listings created before
+  // multi-photo support existed, so nothing already in the database goes blank.
+  const galleryImages: string[] = item.image_urls?.length ? item.image_urls : (item.image_url ? [item.image_url] : []);
 
   const ratingTarget = item.business_id && item.business
     ? { id: item.business.creator_id, name: item.business.name }
@@ -219,8 +226,38 @@ export default function ListingDetailsModal({
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
               <View style={styles.fullSizeImageFrame}>
-                {item.image_url ? (
-                  <Image source={{ uri: item.image_url }} style={styles.fullProductImage} />
+                {galleryImages.length > 0 ? (
+                  <>
+                    <FlatList
+                      data={galleryImages}
+                      horizontal
+                      pagingEnabled
+                      showsHorizontalScrollIndicator={false}
+                      keyExtractor={(uri, index) => uri + index}
+                      onMomentumScrollEnd={(e) => {
+                        const index = Math.round(e.nativeEvent.contentOffset.x / width);
+                        setActiveImageIndex(index);
+                      }}
+                      renderItem={({ item: uri }) => (
+                        <Image source={{ uri }} style={[styles.fullProductImage, { width }]} />
+                      )}
+                    />
+                    {galleryImages.length > 1 && (
+                      <>
+                        <View style={styles.imageCounterBadge}>
+                          <Text style={styles.imageCounterText}>{activeImageIndex + 1} / {galleryImages.length}</Text>
+                        </View>
+                        <View style={styles.dotsRow}>
+                          {galleryImages.map((_, index) => (
+                            <View
+                              key={index}
+                              style={[styles.dot, index === activeImageIndex && styles.dotActive]}
+                            />
+                          ))}
+                        </View>
+                      </>
+                    )}
+                  </>
                 ) : (
                   <View style={styles.fullPlaceholderImage}>
                     <Ionicons name="image-outline" size={80} color="#CBD5E1" />
@@ -391,7 +428,12 @@ const styles = StyleSheet.create({
   detailsHeaderActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, height: 50, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   circularCloseButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   detailsHeaderTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
-  fullSizeImageFrame: { width: width, height: height * 0.4, backgroundColor: '#F1F5F9' },
+  fullSizeImageFrame: { width: width, height: height * 0.4, backgroundColor: '#F1F5F9', position: 'relative' },
+  imageCounterBadge: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  imageCounterText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  dotsRow: { position: 'absolute', bottom: 14, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center' },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)', marginHorizontal: 3 },
+  dotActive: { backgroundColor: '#fff', width: 18 },
   fullProductImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   fullPlaceholderImage: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   detailsBodyTextWrapper: { padding: 24 },

@@ -3,11 +3,14 @@ import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
+import { compressImage } from '../../lib/mediaCompression';
+import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
 
 export default function EditBusinessModal({ visible, onClose, business, onUpdate }: any) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: business.name,
+    category: business.category,
     description: business.description,
     location: business.location,
     contact_phone: business.contact_phone,
@@ -28,16 +31,18 @@ export default function EditBusinessModal({ visible, onClose, business, onUpdate
 
     setLoading(true);
     try {
-      const uri = result.assets[0].uri;
-      const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const compressed = await compressImage(result.assets[0].uri, {
+        maxDimension: type === 'logo' ? 800 : 1600,
+      });
+      const fileExt = 'jpg';
       const fileName = `${type}-${business.id}-${Date.now()}.${fileExt}`;
-      
+
       // CRITICAL FIX: Use FormData instead of fetch().blob() to prevent 0-byte uploads
       const formData = new FormData();
-      formData.append('file', { 
-        uri: uri, 
-        name: fileName, 
-        type: `image/${fileExt === 'png' ? 'png' : 'jpeg'}` 
+      formData.append('file', {
+        uri: compressed.uri,
+        name: fileName,
+        type: 'image/jpeg'
       } as any);
       
       const { error: uploadError } = await supabase.storage
@@ -135,7 +140,20 @@ export default function EditBusinessModal({ visible, onClose, business, onUpdate
 
             <Text style={styles.label}>Business Name</Text>
             <TextInput style={styles.input} value={formData.name} onChangeText={(t) => setFormData({...formData, name: t})} />
-            
+
+            <Text style={styles.label}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
+              {BUSINESS_CATEGORIES.map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.categoryPill, formData.category === cat && styles.categoryPillActive]}
+                  onPress={() => setFormData({...formData, category: cat})}
+                >
+                  <Text style={[styles.categoryPillText, formData.category === cat && styles.categoryPillTextActive]}>{cat}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
             <Text style={styles.label}>Location</Text>
             <TextInput style={styles.input} value={formData.location} onChangeText={(t) => setFormData({...formData, location: t})} />
             
@@ -196,6 +214,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC'
   },
   brandingSection: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  categoryScroll: { paddingBottom: 4 },
+  categoryPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F1F5F9', marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
+  categoryPillActive: { backgroundColor: '#1E293B', borderColor: '#1E293B' },
+  categoryPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
+  categoryPillTextActive: { color: '#fff' },
   uploadBtn: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 12, flex: 0.48, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
   uploadBtnText: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
   saveButton: { 

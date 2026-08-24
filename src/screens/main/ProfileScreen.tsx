@@ -9,6 +9,8 @@ import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
 
 const INTEREST_CATEGORIES = [
   'Parties & Celebrations', 'Weddings', 'Music & Concerts', 'Arts & Entertainment', 
@@ -69,11 +71,11 @@ export default function ProfileScreen({ route, navigation }: any) {
     try {
       setLoading(true);
       
-      const { data: profileData, error: profileError } = await supabase
+      const { data: profileData, error: profileError } = await withRetry(() => supabase
         .from('users')
         .select('*')
         .eq('id', session.user.id)
-        .single();
+        .single());
       
       if (profileError) throw profileError;
       if (profileData) {
@@ -178,13 +180,12 @@ export default function ProfileScreen({ route, navigation }: any) {
       let finalAvatarUrl = profile?.avatar_url;
 
       if (editAvatarUri && !editAvatarUri.startsWith('http')) {
-        const fileExt = editAvatarUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressed = await compressImage(editAvatarUri, { maxDimension: 800 });
+        const fileExt = 'jpg';
         const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
-        const response = await fetch(editAvatarUri);
-        const blob = await response.blob();
         const formData = new FormData();
-        
-        formData.append('file', { uri: editAvatarUri, name: fileName, type: `image/${fileExt}` } as any);
+
+        formData.append('file', { uri: compressed.uri, name: fileName, type: `image/${fileExt}` } as any);
         
         const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, formData);
         if (uploadError) throw uploadError;

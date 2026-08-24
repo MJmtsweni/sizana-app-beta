@@ -14,13 +14,24 @@ import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
 import { getDistanceKm, formatDistance } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
 export default function ForumsScreen({ navigation, route, session: directSession }: any) {
   const session = route?.params?.session || directSession;
   const insets = useSafeAreaInsets();
 
   // Feed States
+  // `posts` is the full personalized-feed result (unbounded — see
+  // fetchPosts) — only needed for Home/Nearby, which filter/sort it
+  // client-side over the whole set. Explore scope uses its own paginated
+  // dataset below instead of fetching everything up front.
   const [posts, setPosts] = useState<any[]>([]);
+  const [explorePosts, setExplorePosts] = useState<any[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [scope, setScope] = useState<Scope>('explore');
   const { coords: deviceCoords, status: deviceLocationStatus } = useDeviceLocation();
   const { capturing: capturingLocation, captureLocation } = useLocationCapture();
@@ -62,89 +73,102 @@ export default function ForumsScreen({ navigation, route, session: directSession
     'Government & Public Services', 'Other'
   ];
 
+  function refreshPosts() {
+    if (scope === 'explore') fetchExplorePosts();
+    else fetchPosts();
+  }
+
   useFocusEffect(
     useCallback(() => {
-      fetchPosts();
-      fetchUserBusinesses(); 
-    }, [session?.user?.id])
+      refreshPosts();
+      fetchUserBusinesses();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session?.user?.id, scope])
   );
 
+  async function getUserInterests(): Promise<string[]> {
+    const { data: userData } = await supabase
+      .from('users')
+      .select('interests')
+      .eq('id', session.user.id)
+      .single();
+
+    let interestsArray: string[] = [];
+    if (userData?.interests) {
+      if (Array.isArray(userData.interests)) interestsArray = userData.interests;
+      else if (typeof userData.interests === 'string') {
+        try { interestsArray = JSON.parse(userData.interests); }
+        catch { interestsArray = userData.interests.split(',').map((t: string) => t.trim()); }
+      }
+    }
+    return interestsArray;
+  }
+
+  // Hydrates the (ranked) post ids the RPC returned into full post rows +
+  // social metadata, preserving the RPC's rank order.
+  async function hydratePostIds(postIds: string[]) {
+    const { data, error } = await supabase
+      .from('forum_posts')
+      .select(`
+        *,
+        author:author_id (*),
+        business:business_id (*),
+        likes:forum_likes ( user_id ),
+        follows:forum_follows ( user_id ),
+        comments:forum_comments ( id )
+      `)
+      .in('id', postIds);
+
+    if (error) throw error;
+
+    const authorIds = [...new Set(data.map(p => p.author_id).filter(Boolean))];
+    const { data: friendData } = await supabase
+      .from('user_friends')
+      .select('user_id_1, user_id_2')
+      .eq('status', 'accepted')
+      .or(`user_id_1.in.(${authorIds}),user_id_2.in.(${authorIds})`);
+
+    const { data: followerData } = await supabase
+      .from('user_followers')
+      .select('following_id')
+      .eq('follower_id', session.user.id)
+      .in('following_id', authorIds);
+
+    const friendSet = new Set(friendData?.flatMap(f => [f.user_id_1, f.user_id_2]).filter(id => id !== session.user.id));
+    const followingSet = new Set(followerData?.map(f => f.following_id));
+
+    return postIds.map((id: string) => {
+      const post = data.find(p => p.id === id);
+      if (!post) return null;
+      return {
+        ...post,
+        likesCount: post.likes.length,
+        isLiked: post.likes.some((like: any) => like.user_id === session?.user?.id),
+        isFollowing: post.follows.some((follow: any) => follow.user_id === session?.user?.id),
+        isFollowingAuthor: followingSet.has(post.author_id),
+        isFriendWithAuthor: friendSet.has(post.author_id),
+        commentsCount: post.comments ? post.comments.length : 0
+      };
+    }).filter(Boolean);
+  }
+
+  // Home/Nearby need the (near-)complete personalized feed in memory to
+  // filter/sort by location or live distance — this stays unpaginated,
+  // relying on get_personalized_feed's default high p_limit.
   async function fetchPosts() {
     try {
       if (!refreshing) setLoading(true);
 
-      // 1. Get User Interests
-      const { data: userData } = await supabase
-        .from('users')
-        .select('interests')
-        .eq('id', session.user.id)
-        .single();
-
-      // 2. Data transformation for RPC
-      let interestsArray = [];
-      if (userData?.interests) {
-        if (Array.isArray(userData.interests)) interestsArray = userData.interests;
-        else if (typeof userData.interests === 'string') {
-          try { interestsArray = JSON.parse(userData.interests); } 
-          catch { interestsArray = userData.interests.split(',').map((t: string) => t.trim()); }
-        }
-      }
-
-      // 3. Personalized Fetch via RPC
-      const { data: rpcData, error: rpcError } = await supabase.rpc('get_personalized_feed', { 
-        user_interests_param: interestsArray 
-      });
+      const interestsArray = await getUserInterests();
+      const { data: rpcData, error: rpcError } = await withRetry(() => supabase.rpc('get_personalized_feed', {
+        user_interests_param: interestsArray
+      }));
 
       if (rpcError) throw rpcError;
 
       if (rpcData && rpcData.length > 0) {
         const postIds = rpcData.map((p: any) => p.id);
-        const { data, error } = await supabase
-          .from('forum_posts')
-          .select(`
-            *,
-            author:author_id (*),
-            business:business_id (*),
-            likes:forum_likes ( user_id ),
-            follows:forum_follows ( user_id ),
-            comments:forum_comments ( id )
-          `)
-          .in('id', postIds);
-
-        if (error) throw error;
-
-        // Fetch social statuses for authors
-        const authorIds = [...new Set(data.map(p => p.author_id).filter(Boolean))];
-        const { data: friendData } = await supabase
-          .from('user_friends')
-          .select('user_id_1, user_id_2')
-          .eq('status', 'accepted')
-          .or(`user_id_1.in.(${authorIds}),user_id_2.in.(${authorIds})`);
-        
-        const { data: followerData } = await supabase
-          .from('user_followers')
-          .select('following_id')
-          .eq('follower_id', session.user.id)
-          .in('following_id', authorIds);
-
-        const friendSet = new Set(friendData?.flatMap(f => [f.user_id_1, f.user_id_2]).filter(id => id !== session.user.id));
-        const followingSet = new Set(followerData?.map(f => f.following_id));
-
-        const formattedPosts = postIds.map((id: string) => {
-          const post = data.find(p => p.id === id);
-          if (!post) return null;
-          return {
-            ...post,
-            likesCount: post.likes.length,
-            isLiked: post.likes.some((like: any) => like.user_id === session?.user?.id),
-            isFollowing: post.follows.some((follow: any) => follow.user_id === session?.user?.id),
-            isFollowingAuthor: followingSet.has(post.author_id),
-            isFriendWithAuthor: friendSet.has(post.author_id),
-            commentsCount: post.comments ? post.comments.length : 0
-          };
-        }).filter(Boolean);
-        
-        setPosts(formattedPosts);
+        setPosts(await hydratePostIds(postIds));
       } else {
         setPosts([]);
       }
@@ -153,6 +177,61 @@ export default function ForumsScreen({ navigation, route, session: directSession
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }
+
+  async function fetchExplorePosts() {
+    try {
+      if (explorePosts.length === 0) setLoading(true);
+
+      const interestsArray = await getUserInterests();
+      const { data: rpcData, error: rpcError } = await withRetry(() => supabase.rpc('get_personalized_feed', {
+        user_interests_param: interestsArray,
+        p_limit: PAGE_SIZE,
+        p_offset: 0,
+      }));
+
+      if (rpcError) throw rpcError;
+
+      const postIds = (rpcData || []).map((p: any) => p.id);
+      setExplorePosts(postIds.length > 0 ? await hydratePostIds(postIds) : []);
+      setPage(0);
+      setHasMore(postIds.length === PAGE_SIZE);
+    } catch (error: any) {
+      console.error("Error fetching explore posts:", error.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  async function loadMoreExplorePosts() {
+    if (loadingMore || !hasMore || loading || scope !== 'explore') return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const [from] = pageRange(nextPage);
+
+      const interestsArray = await getUserInterests();
+      const { data: rpcData, error: rpcError } = await withRetry(() => supabase.rpc('get_personalized_feed', {
+        user_interests_param: interestsArray,
+        p_limit: PAGE_SIZE,
+        p_offset: from,
+      }));
+
+      if (rpcError) throw rpcError;
+
+      const postIds = (rpcData || []).map((p: any) => p.id);
+      if (postIds.length > 0) {
+        const hydrated = await hydratePostIds(postIds);
+        setExplorePosts(prev => [...prev, ...hydrated]);
+      }
+      setPage(nextPage);
+      setHasMore(postIds.length === PAGE_SIZE);
+    } catch (error: any) {
+      console.error("Error loading more explore posts:", error.message);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -175,12 +254,20 @@ export default function ForumsScreen({ navigation, route, session: directSession
         await supabase.from('user_friends').insert({ user_id_1: session.user.id, user_id_2: authorId, status: 'pending' });
         Alert.alert("Request Sent", "Friend request sent!");
       }
-      fetchPosts();
+      refreshPosts();
     } catch (e: any) { Alert.alert("Error", e.message); }
   };
 
+  // Explore scope renders explorePosts, not posts — update both in lockstep
+  // so an optimistic edit shows up regardless of which scope is active.
+  // Whichever array doesn't contain postId is a harmless no-op map.
+  function updatePostInPlace(postId: string, updater: (p: any) => any) {
+    setPosts(prev => prev.map(p => p.id === postId ? updater(p) : p));
+    setExplorePosts(prev => prev.map(p => p.id === postId ? updater(p) : p));
+  }
+
   const toggleLike = async (postId: string, currentlyLiked: boolean) => {
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, isLiked: !currentlyLiked, likesCount: currentlyLiked ? p.likesCount - 1 : p.likesCount + 1 } : p));
+    updatePostInPlace(postId, p => ({ ...p, isLiked: !currentlyLiked, likesCount: currentlyLiked ? p.likesCount - 1 : p.likesCount + 1 }));
     if (currentlyLiked) await supabase.from('forum_likes').delete().match({ post_id: postId, user_id: session.user.id });
     else await supabase.from('forum_likes').insert({ post_id: postId, user_id: session.user.id });
   };
@@ -190,7 +277,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
   // and DashboardScreen's "Active Forums" card both read from.
   const toggleFollowPost = async (postId: string, currentlyFollowing: boolean) => {
     // Optimistic UI update — bell reflects the tap immediately
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, isFollowing: !currentlyFollowing } : p));
+    updatePostInPlace(postId, p => ({ ...p, isFollowing: !currentlyFollowing }));
 
     try {
       if (currentlyFollowing) {
@@ -207,7 +294,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
       }
     } catch (e: any) {
       // Roll back if the write actually failed
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, isFollowing: currentlyFollowing } : p));
+      updatePostInPlace(postId, p => ({ ...p, isFollowing: currentlyFollowing }));
       Alert.alert('Error', 'Could not update follow status: ' + e.message);
     }
   };
@@ -242,10 +329,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
       setUploading(true);
       let finalMediaUrl = mediaUri; 
       if (mediaUri && !mediaUri.startsWith('http')) {
-        const fileExt = mediaUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressed = await compressImage(mediaUri, { maxDimension: 1600 });
+        const fileExt = 'jpg';
         const fileName = `post-${Date.now()}.${fileExt}`;
         const formData = new FormData();
-        formData.append('file', { uri: mediaUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressed.uri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
@@ -257,7 +345,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
       } else {
         await supabase.from('forum_posts').insert({ author_id: session.user.id, business_id: postingAsBusinessId, title: newTitle, content: newContent, topic: newTopic, tags: tagArray, media_url: finalMediaUrl, comments_disabled: disableComments, location: newLocation.trim() || null, latitude: newLatitude, longitude: newLongitude });
       }
-      setCreateModalVisible(false); clearForm(); fetchPosts();
+      setCreateModalVisible(false); clearForm(); refreshPosts();
     } catch (e: any) { Alert.alert("Publish Failed", e.message); } finally { setUploading(false); }
   }
 
@@ -343,14 +431,16 @@ export default function ForumsScreen({ navigation, route, session: directSession
   
   {/* Metadata Row remains below the name */}
   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-    <Text style={styles.postTopicBadge}>{item.topic}</Text>
-    <Text style={styles.postDateText}> • {formatTimestamp(item.created_at)}</Text>
-    {item._distanceKm != null ? (
-      <Text style={styles.postDateText}> • {formatDistance(item._distanceKm)}</Text>
-    ) : item.location ? (
-      <Text style={styles.postDateText}> • {item.location}</Text>
-    ) : null}
+    <Text style={styles.postTopicBadge} numberOfLines={1}>{item.topic}</Text>
+    <Text style={styles.postDateText} numberOfLines={1}>
+      {' '}• {formatTimestamp(item.created_at)}
+    </Text>
   </View>
+  {(item._distanceKm != null || item.location) && (
+    <Text style={styles.postLocationText} numberOfLines={1} ellipsizeMode="tail">
+      {item._distanceKm != null ? formatDistance(item._distanceKm) : item.location}
+    </Text>
+  )}
 </View>
           </TouchableOpacity>
 
@@ -403,7 +493,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
   // back to author/business location for any legacy post the SQL backfill missed).
   // Nearby: real distance ranking using each post's own coordinates, when present;
   // falls back to the Home-style text match if GPS is unavailable/denied.
-  let scopedPosts = posts;
+  let scopedPosts = scope === 'explore' ? explorePosts : posts;
   if (scope === 'home') {
     scopedPosts = myLocation
       ? posts.filter((p) => {
@@ -451,8 +541,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
         keyExtractor={(item) => String(item.id)}
         renderItem={renderPostCard}
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-        onRefresh={() => { setRefreshing(true); fetchPosts(); }}
+        onRefresh={() => { setRefreshing(true); refreshPosts(); }}
         refreshing={refreshing}
+        onEndReached={scope === 'explore' ? loadMoreExplorePosts : undefined}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={scope === 'explore' && loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
         ListEmptyComponent={
           scope === 'home' && !myLocation ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
@@ -540,9 +633,10 @@ const styles = StyleSheet.create({
   navTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
   postCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   postHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  authorRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  authorRow: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   avatarImage: { width: 40, height: 40, borderRadius: 20 },
-  authorDetails: { marginLeft: 10, flex: 1, justifyContent: 'center' },
+  authorDetails: { marginLeft: 10, flex: 1, minWidth: 0, justifyContent: 'center' },
+  postLocationText: { fontSize: 11, fontWeight: '600', color: '#94A3B8', marginTop: 2 },
   authorName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   postTopicBadge: { fontSize: 11, fontWeight: '700', color: '#3B82F6', marginTop: 2 },
   plusButton: { backgroundColor: '#34C759', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },

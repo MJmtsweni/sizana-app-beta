@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import NotificationBell from './NotificationBell';
 import MailIcon from './MailIcon';
+import { colors, spacing, typography } from '../../theme';
 
 // Adjust this path to wherever the asset actually lives relative to this file
 const LOGO_MARK = require('../../../assets/sizana-navbar-icon.png');
@@ -33,7 +34,7 @@ export default function AppHeader({ session, variant, title, displayName, avatar
                 {avatarUri ? (
                   <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
                 ) : (
-                  <Ionicons name="person-circle" size={40} color="#ccc" />
+                  <Ionicons name="person-circle" size={40} color={colors.slate[300]} />
                 )}
               </View>
             </TouchableOpacity>
@@ -47,32 +48,34 @@ export default function AppHeader({ session, variant, title, displayName, avatar
 
       {/* RIGHT: bell + mail, identical everywhere. */}
       <View style={styles.rightSection}>
-        <View style={{ marginRight: 0 }}>
+        <View style={{ marginRight: 16 }}>
           <MailIcon session={session} />
         </View>
         <NotificationBell session={session} />
       </View>
 
-      {/* CENTER: the logo itself is the Dashboard shortcut — tap-the-logo-to-go-home
-          is a well-understood convention, so this replaces the grid icon entirely
-          rather than adding a second floating button elsewhere that would collide
-          with each screen's own FAB (e.g. Market's "+ Sell"). */}
-      {variant === 'main' && (
-        <View style={styles.centerOverlay}>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Dashboard', { session })}
-            style={styles.logoButton}
-            activeOpacity={0.75}
-          >
-            <View style={styles.logoStack}>
-              <View style={styles.logoBadge}>
-                <Image source={LOGO_MARK} style={styles.logoMark} />
-              </View>
-              <Ionicons name="chevron-down" size={11} color="#94A3B8" style={styles.logoChevron} />
+      {/* CENTER: the logo is always present now — on Main it's the Dashboard
+          shortcut (tap-the-logo-to-go-home); on Dashboard itself, tapping it
+          goes back to Main, mirroring the floating exit button already on
+          DashboardScreen. Brand mark stays visible on every screen either way. */}
+      <View style={styles.centerOverlay}>
+        <TouchableOpacity
+          onPress={() =>
+            variant === 'main'
+              ? navigation.navigate('Dashboard', { session })
+              : navigation.navigate('Main', { session })
+          }
+          style={styles.logoButton}
+          activeOpacity={0.75}
+        >
+          <View style={styles.logoStack}>
+            <View style={styles.logoBadge}>
+              <Image source={LOGO_MARK} style={styles.logoMark} />
             </View>
-          </TouchableOpacity>
-        </View>
-      )}
+            <Ionicons name="chevron-down" size={11} color={colors.textTertiary} style={styles.logoChevron} />
+          </View>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -83,13 +86,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 15,
+    paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === 'ios' ? 60 : 45,
-    paddingBottom: 15,
-    marginBottom: 10,
+    paddingBottom: spacing.lg,
+    marginBottom: spacing.sm,
     borderBottomWidth: 1,
-    borderColor: '#eee',
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    backgroundColor: colors.background,
   },
   leftSection: {
     flex: 1,
@@ -117,7 +120,7 @@ const styles = StyleSheet.create({
   logoButton: {
     padding: 4,
     pointerEvents: 'auto',
-    transform: [{ translateY: 25 }],
+    transform: [{ translateY: 8 }],
     zIndex: 10,
     elevation: 6,
   },
@@ -125,17 +128,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoBadge: {
-    width: 46,
-    height: 46,
+    width: 44,
+    height: 44,
     borderRadius: 22,
     overflow: 'hidden',
-    backgroundColor: '#F0FDF4',
+    backgroundColor: colors.brandSubtle,
     justifyContent: 'center',
     alignItems: 'center',
   },
   logoMark: {
-    width: 46,
-    height: 46,
+    width: 44,
+    height: 44,
     resizeMode: 'cover',
   },
   logoChevron: {
@@ -148,17 +151,16 @@ const styles = StyleSheet.create({
   avatarContainer: { 
     marginRight: 10 
   },
-  avatarImage: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
-    borderWidth: 1, 
-    borderColor: '#ccc', 
-    backgroundColor: '#eee' 
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.backgroundMuted
   },
-  navTitle: { 
-    fontSize: 18, 
-    fontWeight: '800', 
-    color: '#1E293B' 
+  navTitle: {
+    ...typography.h2,
+    color: colors.textPrimary,
   },
 });

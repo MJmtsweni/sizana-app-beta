@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { 
   StyleSheet, Text, View, FlatList, Image, 
   TouchableOpacity, TextInput, ActivityIndicator, 
@@ -9,6 +9,9 @@ import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ListingDetailsModal from './ListingDetailsModal';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
 const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 40) / 2;
@@ -50,11 +53,16 @@ const PRICE_LABEL: Record<string, string> = {
 export default function MarketScreen({ route, session: directSession, navigation }: any) {
   const session = route?.params?.session || directSession;
 
-  const [listings, setListings] = useState<any[]>([]);
   const [filteredListings, setFilteredListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Skips the redundant fetch the search/filter debounce effect would
+  // otherwise fire on mount, right on top of useFocusEffect's own fetch.
+  const isFirstFilterRun = useRef(true);
 
   // Type + category filter state
   const [listingType, setListingType] = useState('product');
@@ -71,7 +79,8 @@ export default function MarketScreen({ route, session: directSession, navigation
   const [newCategory, setNewCategory] = useState(CATEGORY_MAP.product[1]);
   const [newLocation, setNewLocation] = useState('Schweizer-Reneke');
   const [newDescription, setNewDescription] = useState('');
-  const [newImageUrl, setNewImageUrl] = useState('');
+  const [newImageUrls, setNewImageUrls] = useState<string[]>([]);
+  const MAX_PHOTOS = 6;
   const [creatingListingType, setCreatingListingType] = useState('product');
 
   // Edit mode — holds the ID of the listing being edited, null when creating
@@ -95,22 +104,38 @@ export default function MarketScreen({ route, session: directSession, navigation
     }, [session?.user?.id])
   );
 
+  // Search/category/location/type filters are all applied server-side now
+  // (not client-side over a fully-fetched table), so pagination and
+  // filtering compose correctly instead of a page boundary silently
+  // hiding matches that were never fetched.
+  function buildListingsQuery() {
+    let query = supabase
+      .from('market_items')
+      .select(`
+        id, title, description, price, category, image_url, image_urls, location, created_at, seller_id, listing_type, business_id,
+        users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
+        business:business_id ( id, name, logo_url, creator_id )
+      `)
+      .eq('listing_type', listingType);
+
+    if (selectedCategory !== 'All') query = query.eq('category', selectedCategory);
+    if (searchQuery.trim()) query = query.ilike('title', `%${searchQuery.trim()}%`);
+    if (locationQuery.trim()) query = query.ilike('location', `%${locationQuery.trim()}%`);
+
+    return query.order('created_at', { ascending: false });
+  }
+
   async function fetchListings() {
     try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('market_items')
-        .select(`
-          id, title, description, price, category, image_url, location, created_at, seller_id, listing_type, business_id,
-          users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
-          business:business_id ( id, name, logo_url, creator_id )
-        `)
-        .order('created_at', { ascending: false });
+      if (filteredListings.length === 0) setLoading(true);
+      const [from, to] = pageRange(0);
+      const { data, error } = await withRetry(() => buildListingsQuery().range(from, to));
 
       if (error) throw error;
       if (data) {
-        setListings(data);
-        applyFilters(data, searchQuery, locationQuery, selectedCategory, listingType);
+        setFilteredListings(data);
+        setPage(0);
+        setHasMore(data.length === PAGE_SIZE);
       }
     } catch (error: any) {
       Alert.alert('Marketplace Load Error', error.message);
@@ -119,6 +144,39 @@ export default function MarketScreen({ route, session: directSession, navigation
       setRefreshing(false);
     }
   }
+
+  async function loadMoreListings() {
+    if (loadingMore || !hasMore || loading) return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const [from, to] = pageRange(nextPage);
+      const { data, error } = await withRetry(() => buildListingsQuery().range(from, to));
+
+      if (error) throw error;
+      if (data) {
+        setFilteredListings(prev => [...prev, ...data]);
+        setPage(nextPage);
+        setHasMore(data.length === PAGE_SIZE);
+      }
+    } catch (error: any) {
+      console.error('Marketplace load-more error:', error.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // Re-fetches page 0 whenever a filter changes, debounced so search-as-you-type
+  // doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
+      return;
+    }
+    const handle = setTimeout(() => { fetchListings(); }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, locationQuery, selectedCategory, listingType]);
 
   async function fetchUserBusinesses() {
     if (!session?.user?.id) return;
@@ -134,28 +192,17 @@ export default function MarketScreen({ route, session: directSession, navigation
     }
   }
 
-  const applyFilters = (allData: any[], search: string, location: string, cat: string, type: string) => {
-    let temp = allData.filter(item => item.listing_type === type);
-    if (cat !== 'All') temp = temp.filter(item => item.category === cat);
-    if (search.trim() !== '') {
-      temp = temp.filter(item => 
-        item.title.toLowerCase().includes(search.toLowerCase()) || 
-        item.description?.toLowerCase().includes(search.toLowerCase())
-      );
-    }
-    if (location.trim() !== '') {
-      temp = temp.filter(item => item.location?.toLowerCase().includes(location.toLowerCase()));
-    }
-    setFilteredListings(temp);
-  };
-
   const handleSelectListingType = (type: string) => {
     setListingType(type);
     setSelectedCategory('All');
-    applyFilters(listings, searchQuery, locationQuery, 'All', type);
   };
 
   async function handlePickProductImage() {
+    if (newImageUrls.length >= MAX_PHOTOS) {
+      Alert.alert('Photo Limit Reached', `You can add up to ${MAX_PHOTOS} photos per listing.`);
+      return;
+    }
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission Required', 'Sizana needs camera roll access to add photos.');
@@ -177,14 +224,15 @@ export default function MarketScreen({ route, session: directSession, navigation
   async function uploadProductImage(localUri: string) {
     try {
       setUploading(true);
-      const fileExt = localUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const compressed = await compressImage(localUri, { maxDimension: 1600 });
+      const fileExt = 'jpg';
       const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
 
       const formData = new FormData();
       formData.append('file', {
-        uri: localUri,
+        uri: compressed.uri,
         name: fileName,
-        type: `image/${fileExt === 'png' ? 'png' : 'jpeg'}`
+        type: 'image/jpeg'
       } as any);
 
       const { error: uploadError } = await supabase.storage
@@ -197,13 +245,16 @@ export default function MarketScreen({ route, session: directSession, navigation
         .from('Listings')
         .getPublicUrl(fileName);
 
-      setNewImageUrl(publicUrl);
-      Alert.alert('Image Uploaded', 'Photo staged successfully!');
+      setNewImageUrls(prev => [...prev, publicUrl]);
     } catch (error: any) {
       Alert.alert('Upload Failed', error.message);
     } finally {
       setUploading(false);
     }
+  }
+
+  function handleRemoveImage(index: number) {
+    setNewImageUrls(prev => prev.filter((_, i) => i !== index));
   }
 
   async function handleCreateListing() {
@@ -221,7 +272,8 @@ export default function MarketScreen({ route, session: directSession, navigation
         category: newCategory,
         location: newLocation,
         description: newDescription,
-        image_url: newImageUrl,
+        image_url: newImageUrls[0] || null,
+        image_urls: newImageUrls,
         listing_type: creatingListingType,
         business_id: creatingListingType === 'job' ? postingAsBusinessId : null,
       };
@@ -256,7 +308,7 @@ export default function MarketScreen({ route, session: directSession, navigation
     setNewTitle('');
     setNewPrice('');
     setNewDescription('');
-    setNewImageUrl('');
+    setNewImageUrls([]);
     setNewLocation('Schweizer-Reneke');
     setEditingItemId(null);
     setPostingAsBusinessId(null);
@@ -279,7 +331,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           setNewDescription(item.description || '');
           setNewLocation(item.location || 'Schweizer-Reneke');
           setNewCategory(item.category);
-          setNewImageUrl(item.image_url || '');
+          setNewImageUrls(item.image_urls?.length ? item.image_urls : (item.image_url ? [item.image_url] : []));
           setEditingItemId(item.id);
           setCreatingListingType(item.listing_type);
           setPostingAsBusinessId(item.business_id || null);
@@ -320,8 +372,8 @@ export default function MarketScreen({ route, session: directSession, navigation
       }}
     >
       <View style={styles.imageContainer}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+        {(item.image_urls?.[0] || item.image_url) ? (
+          <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.cardImage} />
         ) : (
           <View style={styles.placeholderImage}>
             <Ionicons name="image-outline" size={40} color="#CBD5E1" />
@@ -333,6 +385,12 @@ export default function MarketScreen({ route, session: directSession, navigation
         {item.business_id && (
           <View style={styles.businessBadge}>
             <Ionicons name="briefcase" size={10} color="#fff" />
+          </View>
+        )}
+        {item.image_urls?.length > 1 && (
+          <View style={styles.photoCountBadge}>
+            <Ionicons name="images" size={10} color="#fff" />
+            <Text style={styles.photoCountText}>{item.image_urls.length}</Text>
           </View>
         )}
       </View>
@@ -387,7 +445,7 @@ export default function MarketScreen({ route, session: directSession, navigation
             style={styles.searchInput}
             placeholder={`Search ${LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()}...`}
             value={searchQuery}
-            onChangeText={(t) => { setSearchQuery(t); applyFilters(listings, t, locationQuery, selectedCategory, listingType); }}
+            onChangeText={setSearchQuery}
           />
         </View>
         <View style={[styles.searchBarContainer, { width: '38%', marginLeft: 6 }]}>
@@ -396,7 +454,7 @@ export default function MarketScreen({ route, session: directSession, navigation
             style={styles.searchInput}
             placeholder="Location..."
             value={locationQuery}
-            onChangeText={(t) => { setLocationQuery(t); applyFilters(listings, searchQuery, t, selectedCategory, listingType); }}
+            onChangeText={setLocationQuery}
           />
         </View>
       </View>
@@ -411,7 +469,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[styles.categoryPill, selectedCategory === item && styles.categoryPillActive]}
-              onPress={() => { setSelectedCategory(item); applyFilters(listings, searchQuery, locationQuery, item, listingType); }}
+              onPress={() => setSelectedCategory(item)}
             >
               <Text style={[styles.categoryText, selectedCategory === item && styles.categoryTextActive]}>{item}</Text>
             </TouchableOpacity>
@@ -431,6 +489,9 @@ export default function MarketScreen({ route, session: directSession, navigation
           contentContainerStyle={styles.gridContainer}
           columnWrapperStyle={styles.gridColumnWrapper}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#34C759']} />}
+          onEndReached={loadMoreListings}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="alert-circle-outline" size={50} color="#CBD5E1" />
@@ -489,18 +550,36 @@ export default function MarketScreen({ route, session: directSession, navigation
                 </>
               )}
 
-              <TouchableOpacity style={styles.modalImageSelector} onPress={handlePickProductImage}>
-                {newImageUrl ? (
-                  <Image source={{ uri: newImageUrl }} style={styles.selectedProductImage} />
-                ) : uploading ? (
-                  <ActivityIndicator color="#34C759" />
-                ) : (
-                  <>
-                    <Ionicons name="camera" size={36} color="#94A3B8" />
-                    <Text style={styles.imageSelectorText}>Add Photo</Text>
-                  </>
+              <Text style={styles.fieldLabel}>
+                Photos ({newImageUrls.length}/{MAX_PHOTOS}) — first photo is the cover
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                {newImageUrls.map((uri, index) => (
+                  <View key={uri + index} style={styles.photoThumbWrap}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                    {index === 0 && (
+                      <View style={styles.coverBadge}>
+                        <Text style={styles.coverBadgeText}>Cover</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity style={styles.removePhotoButton} onPress={() => handleRemoveImage(index)}>
+                      <Ionicons name="close" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {newImageUrls.length < MAX_PHOTOS && (
+                  <TouchableOpacity style={styles.addPhotoTile} onPress={handlePickProductImage} disabled={uploading}>
+                    {uploading ? (
+                      <ActivityIndicator color="#34C759" />
+                    ) : (
+                      <>
+                        <Ionicons name="camera" size={28} color="#94A3B8" />
+                        <Text style={styles.imageSelectorText}>Add Photo</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </ScrollView>
 
               <Text style={styles.fieldLabel}>Title</Text>
               <TextInput style={styles.modalInput} value={newTitle} onChangeText={setNewTitle} placeholder="e.g., Yellow Maize Bags" />
@@ -585,9 +664,15 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  modalImageSelector: { height: 150, backgroundColor: '#F1F5F9', borderRadius: 16, borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 16, overflow: 'hidden' },
-  selectedProductImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imageSelectorText: { fontSize: 13, color: '#64748B', fontWeight: '600', marginTop: 6 },
+  imageSelectorText: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 4 },
+  photoThumbWrap: { width: 100, height: 100, borderRadius: 14, marginRight: 10, overflow: 'hidden', position: 'relative', backgroundColor: '#F1F5F9' },
+  photoThumb: { width: '100%', height: '100%', resizeMode: 'cover' },
+  coverBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(52,199,89,0.9)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  coverBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  removePhotoButton: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' },
+  addPhotoTile: { width: 100, height: 100, borderRadius: 14, backgroundColor: '#F1F5F9', borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center' },
+  photoCountBadge: { position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  photoCountText: { color: '#fff', fontSize: 10, fontWeight: '700', marginLeft: 4 },
   fieldLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 6, marginLeft: 2 },
   modalInput: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#334155', marginBottom: 14, fontWeight: '500' },
   modalTextArea: { height: 70, textAlignVertical: 'top' },
