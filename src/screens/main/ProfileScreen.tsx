@@ -227,10 +227,50 @@ export default function ProfileScreen({ route, navigation }: any) {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This permanently deletes your login, profile, messages, friends, and activity. Businesses, events, and posts you created stay up but are reattributed to \"Deleted User\" so other people's follows and replies aren't broken. This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Account",
+          style: "destructive",
+          onPress: () => {
+            // Second, more explicit confirmation — this is irreversible and
+            // Alert has no typed-confirmation input cross-platform, so a
+            // two-step tap is the safety net instead.
+            Alert.alert(
+              "Are you absolutely sure?",
+              "Your account will be deleted immediately and cannot be recovered.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Yes, delete my account",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      const { error } = await supabase.rpc('delete_account');
+                      if (error) throw error;
+                      await supabase.auth.signOut();
+                    } catch (e: any) {
+                      Alert.alert("Couldn't delete account", e.message || "Please try again, or contact support if this keeps happening.");
+                    }
+                  }
+                }
+              ]
+            );
+          }
+        }
+      ]
+    );
+  };
+
   const handleOpenSettings = () => {
     Alert.alert("Settings", undefined, [
       { text: "Edit Profile", onPress: () => setEditModalVisible(true) },
       { text: "Log Out", style: "destructive", onPress: handleSignOut },
+      { text: "Delete Account", style: "destructive", onPress: handleDeleteAccount },
       { text: "Cancel", style: "cancel" },
     ]);
   };
