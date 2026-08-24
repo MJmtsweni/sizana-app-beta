@@ -1,5 +1,5 @@
 import * as Linking from 'expo-linking';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
   TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
@@ -16,8 +16,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUserLocation } from '../../hooks/useUserLocation';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
-import { getDistanceKm, formatDistance } from '../../lib/distance';
+import { getDistanceKm, formatDistance, NEARBY_RADIUS_KM } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
 export default function EventsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
@@ -26,10 +27,17 @@ export default function EventsScreen({ navigation, route }: any) {
   const [eventDate, setEventDate] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [eventTime, setEventTime] = useState(new Date());
 
-  const [allEvents, setAllEvents] = useState<any[]>([]);
-  const [filteredEvents, setFilteredEvents] = useState<any[]>([]);
+  // One paginated dataset serves Upcoming/Past across all three scopes (see
+  // fetchEventsPage). My RSVPs is handled separately, unpaginated — it's
+  // inherently bounded by how many events one user has RSVP'd to, not by
+  // the size of the events table, so it doesn't need the same treatment.
+  const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const isFirstFilterRun = useRef(true);
   const [activeTab, setActiveTab] = useState('Upcoming');
 
   const [showFilters, setShowFilters] = useState(false);
@@ -71,12 +79,32 @@ export default function EventsScreen({ navigation, route }: any) {
     useCallback(() => {
       fetchEvents();
       fetchUserBusinesses();
-    }, [activeTab, session?.user?.id])
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, scope, session?.user?.id])
   );
 
-  React.useEffect(() => {
-    applyFilters();
-  }, [searchLocation, searchCategory, searchDate, allEvents, activeTab, scope, myLocation, deviceCoords]);
+  // Location/GPS resolving asynchronously after mount needs its own
+  // trigger — Home/Nearby depend on it but it isn't known yet when the
+  // focus effect above first runs.
+  useEffect(() => {
+    if (scope === 'explore') return;
+    fetchEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation, deviceCoords, scope]);
+
+  // Search filters are applied server-side (for Upcoming/Past) or
+  // client-side over the small RSVP set (for My RSVPs) — either way, a
+  // change re-fetches page 0 rather than re-filtering an in-memory array.
+  // Debounced so search-as-you-type doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
+      return;
+    }
+    const handle = setTimeout(() => { fetchEvents(); }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchLocation, searchCategory, searchDate]);
 
   async function fetchUserBusinesses() {
     if (!session?.user?.id) return;
@@ -93,32 +121,140 @@ export default function EventsScreen({ navigation, route }: any) {
     }
   }
 
+  function formatEvent(ev: any) {
+    return {
+      ...ev,
+      rsvpCount: ev.rsvps ? ev.rsvps.length : 0,
+      isAttending: ev.rsvps ? ev.rsvps.some((r: any) => r.user_id === session?.user?.id) : false,
+      isPast: new Date(ev.event_date) < new Date(),
+    };
+  }
+
+  const EVENT_SELECT = `*, creator:creator_id ( * ), business:business_id ( * ), rsvps:event_rsvps ( user_id )`;
+
+  async function hydrateEventIds(ids: string[]) {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabase.from('events').select(EVENT_SELECT).in('id', ids);
+    if (error) throw error;
+    return ids
+      .map(id => data?.find((e: any) => e.id === id))
+      .filter(Boolean)
+      .map(formatEvent);
+  }
+
+  // Every private event the user is entitled to see: public ones, their
+  // own, or ones they've RSVP'd to (an invite doesn't require being the
+  // creator). Used to build the OR filter for Upcoming/Past below.
+  async function getUserRsvpEventIds(): Promise<string[]> {
+    const { data } = await supabase.from('event_rsvps').select('event_id').eq('user_id', session.user.id);
+    return (data || []).map((r: any) => r.event_id);
+  }
+
+  // A specific typed date takes precedence over the tab's implicit range —
+  // searching a date is a stronger signal than "upcoming vs past".
+  function computeDateRange(): { after: string | null; before: string | null } {
+    if (searchDate.trim()) {
+      const d = searchDate.trim();
+      return { after: `${d}T00:00:00`, before: `${d}T23:59:59.999` };
+    }
+    const nowIso = new Date().toISOString();
+    if (activeTab === 'Upcoming') return { after: nowIso, before: null };
+    return { after: null, before: nowIso }; // Past
+  }
+
+  // My RSVPs is inherently small (bounded by the user's own activity, not
+  // the events table), so it's fetched whole and filtered/sorted client-side
+  // rather than going through the same paginated machinery as the other tabs.
+  async function fetchMyRsvpEvents(): Promise<any[]> {
+    const { data, error } = await withRetry(() => supabase
+      .from('event_rsvps')
+      .select(`events ( ${EVENT_SELECT} )`)
+      .eq('user_id', session.user.id));
+    if (error) throw error;
+
+    let evts = (data || []).map((r: any) => r.events).filter(Boolean).map(formatEvent);
+
+    if (searchCategory !== 'All') evts = evts.filter((e: any) => e.category === searchCategory);
+    if (searchLocation.trim()) evts = evts.filter((e: any) => e.location?.toLowerCase().includes(searchLocation.trim().toLowerCase()));
+    if (searchDate.trim()) evts = evts.filter((e: any) => e.event_date.startsWith(searchDate.trim()));
+
+    if (scope === 'nearby' && deviceCoords) {
+      evts = evts
+        .filter((e: any) => e.latitude != null && e.longitude != null)
+        .map((e: any) => ({ ...e, _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, e.latitude, e.longitude) }))
+        .sort((a: any, b: any) => a._distanceKm - b._distanceKm);
+    } else if (scope === 'home' || scope === 'nearby') {
+      if (!myLocation) return [];
+      evts = evts.filter((e: any) => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
+    } else {
+      evts.sort((a: any, b: any) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+    }
+
+    return evts;
+  }
+
+  async function fetchEventsPage(pageNum: number): Promise<any[]> {
+    const [from, to] = pageRange(pageNum);
+    const { after, before } = computeDateRange();
+
+    if (scope === 'nearby' && deviceCoords) {
+      const { data, error } = await withRetry(() => supabase.rpc('nearby_events', {
+        p_lat: deviceCoords.latitude,
+        p_lng: deviceCoords.longitude,
+        p_user_id: session.user.id,
+        p_radius_km: NEARBY_RADIUS_KM,
+        p_category: searchCategory !== 'All' ? searchCategory : null,
+        p_after: after,
+        p_before: before,
+        p_limit: PAGE_SIZE,
+        p_offset: from,
+      }));
+      if (error) throw error;
+      const ranked = data || [];
+      if (ranked.length === 0) return [];
+      const distanceById = new Map(ranked.map((r: any) => [r.id, r.distance_km]));
+      const hydrated = await hydrateEventIds(ranked.map((r: any) => r.id));
+      return hydrated.map((e: any) => ({ ...e, _distanceKm: distanceById.get(e.id) }));
+    }
+
+    if (scope === 'home' && !myLocation) return [];
+    if (scope === 'nearby' && !myLocation) return []; // no GPS, no profile location either
+
+    const rsvpIds = await getUserRsvpEventIds();
+    let query = supabase.from('events').select(EVENT_SELECT);
+    // Public events, the user's own, or ones they've been invited to via RSVP.
+    const visibilityParts = [`is_private.eq.false`, `creator_id.eq.${session.user.id}`];
+    if (rsvpIds.length > 0) visibilityParts.push(`id.in.(${rsvpIds.join(',')})`);
+    query = query.or(visibilityParts.join(','));
+
+    if (searchCategory !== 'All') query = query.eq('category', searchCategory);
+    if (searchLocation.trim()) query = query.ilike('location', `%${searchLocation.trim()}%`);
+    if (after) query = query.gte('event_date', after);
+    if (before) query = query.lt('event_date', before);
+    // Nearby without live GPS falls back to the Home-style text match.
+    if (scope === 'home' || scope === 'nearby') query = query.ilike('location', `%${myLocation}%`);
+
+    const { data, error } = await withRetry(() => query.order('event_date', { ascending: true }).range(from, to));
+    if (error) throw error;
+    return (data || []).map(formatEvent);
+  }
+
   async function fetchEvents() {
     try {
-      if (!refreshing) setLoading(true);
-      
-      const { data, error } = await withRetry(() => supabase
-        .from('events')
-        .select(`
-          *,
-          creator:creator_id ( * ),
-          business:business_id ( * ),
-          rsvps:event_rsvps ( user_id )
-        `)
-        .order('event_date', { ascending: true }));
+      if (events.length === 0) setLoading(true);
 
-      if (error) throw error;
-
-      if (data) {
-        const now = new Date();
-        const formatted = data.map(ev => ({
-          ...ev,
-          rsvpCount: ev.rsvps ? ev.rsvps.length : 0,
-          isAttending: ev.rsvps ? ev.rsvps.some((r: any) => r.user_id === session?.user?.id) : false,
-          isPast: new Date(ev.event_date) < now
-        }));
-        setAllEvents(formatted);
+      if (activeTab === 'My RSVPs') {
+        const data = await fetchMyRsvpEvents();
+        setEvents(data);
+        setPage(0);
+        setHasMore(false);
+        return;
       }
+
+      const data = await fetchEventsPage(0);
+      setEvents(data);
+      setPage(0);
+      setHasMore(data.length === PAGE_SIZE);
     } catch (e: any) {
       console.error("Events fetch error:", e.message);
     } finally {
@@ -127,56 +263,21 @@ export default function EventsScreen({ navigation, route }: any) {
     }
   }
 
-  const applyFilters = () => {
-    let result = [...allEvents];
-
-    result = result.filter(e => 
-      !e.is_private || e.creator_id === session?.user?.id || e.isAttending
-    );
-
-    if (scope === 'home') {
-      if (!myLocation) {
-        setFilteredEvents([]);
-        return;
-      }
-      result = result.filter(e => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
-    } else if (scope === 'nearby') {
-      if (deviceCoords) {
-        result = result
-          .filter(e => e.latitude != null && e.longitude != null)
-          .map(e => ({
-            ...e,
-            _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, e.latitude, e.longitude),
-          }))
-          .sort((a, b) => a._distanceKm - b._distanceKm);
-      } else if (myLocation) {
-        result = result.filter(e => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
-      } else {
-        setFilteredEvents([]);
-        return;
-      }
+  async function loadMoreEvents() {
+    if (loadingMore || !hasMore || loading || activeTab === 'My RSVPs') return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const data = await fetchEventsPage(nextPage);
+      setEvents(prev => [...prev, ...data]);
+      setPage(nextPage);
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (e: any) {
+      console.error("Events load-more error:", e.message);
+    } finally {
+      setLoadingMore(false);
     }
-
-    if (activeTab === 'Upcoming') {
-      result = result.filter(e => !e.isPast);
-    } else if (activeTab === 'My RSVPs') {
-      result = result.filter(e => e.isAttending);
-    } else {
-      result = result.filter(e => e.isPast);
-    }
-
-    if (searchLocation.trim()) {
-      result = result.filter(e => e.location.toLowerCase().includes(searchLocation.toLowerCase()));
-    }
-    if (searchCategory !== 'All') {
-      result = result.filter(e => e.category === searchCategory);
-    }
-    if (searchDate.trim()) {
-      result = result.filter(e => e.event_date.startsWith(searchDate.trim()));
-    }
-
-    setFilteredEvents(result);
-  };
+  }
 
   const clearFilters = () => {
     setSearchLocation('');
@@ -185,7 +286,7 @@ export default function EventsScreen({ navigation, route }: any) {
   };
 
   const toggleRSVP = async (event: any, currentlyAttending: boolean) => {
-    setAllEvents(prev => prev.map(e => {
+    setEvents(prev => prev.map(e => {
       if (e.id === event.id) {
         return {
           ...e,
@@ -204,7 +305,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
       if (error) {
         console.error('RSVP delete error:', error.message);
-        setAllEvents(prev => prev.map(e =>
+        setEvents(prev => prev.map(e =>
           e.id === event.id ? { ...e, isAttending: true, rsvpCount: e.rsvpCount + 1 } : e
         ));
       }
@@ -215,7 +316,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
       if (rsvpError) {
         console.error('RSVP insert error:', rsvpError.message);
-        setAllEvents(prev => prev.map(e =>
+        setEvents(prev => prev.map(e =>
           e.id === event.id ? { ...e, isAttending: false, rsvpCount: e.rsvpCount - 1 } : e
         ));
         return;
@@ -503,13 +604,16 @@ export default function EventsScreen({ navigation, route }: any) {
         <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
       ) : (
         <FlatList
-          data={filteredEvents}
+          data={events}
           keyExtractor={(item) => item.id}
           renderItem={renderEventCard}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           onRefresh={() => { setRefreshing(true); fetchEvents(); }}
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreEvents}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <View style={styles.emptyLayout}>

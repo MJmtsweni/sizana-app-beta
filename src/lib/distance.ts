@@ -1,3 +1,9 @@
+// Matches the default in the nearby_businesses/nearby_events/nearby_forum_posts
+// Supabase RPCs (supabase/migrations/20260824040000_nearby_rpcs.sql) — pass
+// explicitly rather than relying on the SQL default so client and server
+// can't silently drift apart.
+export const NEARBY_RADIUS_KM = 100;
+
 // Haversine formula — great-circle distance in kilometers between two points.
 export function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;

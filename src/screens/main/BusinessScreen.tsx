@@ -12,7 +12,7 @@ import { supabase } from '../../lib/supabase'; // Adjust path if necessary
 import { useUserLocation } from '../../hooks/useUserLocation';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
-import { getDistanceKm, formatDistance } from '../../lib/distance';
+import { formatDistance, NEARBY_RADIUS_KM } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
 import { pickImage as pickImageHelper, uploadImageToStorage } from '../../lib/imageUpload';
 import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
@@ -27,21 +27,15 @@ export default function BusinessScreen({ navigation, route }: any) {
   const [openTime, setOpenTime] = useState(new Date(new Date().setHours(8, 0, 0, 0))); // Defaults to 08:00
   const [closeTime, setCloseTime] = useState(new Date(new Date().setHours(17, 0, 0, 0))); // Defaults to 17:00
 
-  // Full, unfiltered table — only fetched (and only needed) for the Home/Nearby
-  // scopes, which rank by location match / live distance over the whole set
-  // client-side. Explore scope never touches this; it's paginated separately
-  // below since it doesn't need the full dataset in memory.
+  // One paginated dataset serves all three scopes — which query builds each
+  // page (see fetchBusinessesPage) is the only thing that changes.
   const [businesses, setBusinesses] = useState<any[]>([]);
-  const [filteredBusinesses, setFilteredBusinesses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Explore scope's own paginated, server-filtered dataset.
-  const [exploreBusinesses, setExploreBusinesses] = useState<any[]>([]);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const isFirstExploreFilterRun = useRef(true);
+  const isFirstFilterRun = useRef(true);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
@@ -88,137 +82,128 @@ export default function BusinessScreen({ navigation, route }: any) {
   // Business being edited via the card's "Manage Business" menu
   const [editingBusiness, setEditingBusiness] = useState<any>(null);
 
-  // Dispatches to whichever fetch backs the currently active scope — used
-  // on focus and after any mutation (create/delete/gallery add) so both
-  // paths stay a single source of truth for "refresh what's on screen now".
-  function refreshBusinesses() {
-    if (scope === 'explore') fetchExploreBusinesses();
-    else fetchBusinesses();
-  }
-
   useFocusEffect(
-    useCallback(() => { refreshBusinesses(); }, [scope])
+    useCallback(() => { fetchBusinesses(); }, [scope])
   );
 
-  React.useEffect(() => { applyFilters(); }, [searchQuery, activeCategory, businesses, scope, myLocation, deviceCoords]);
-
-  // Explore's search/category filters are applied server-side (unlike
-  // Home/Nearby, which filter the full in-memory `businesses` array above),
-  // so a change re-fetches page 0 instead of re-filtering locally. Debounced
-  // so search-as-you-type doesn't fire a request per keystroke.
+  // Location/GPS resolving asynchronously after mount (permission prompt,
+  // profile fetch) needs its own trigger — Home/Nearby depend on it but it
+  // isn't known yet when the focus effect above first runs.
   useEffect(() => {
-    if (scope !== 'explore') return;
-    if (isFirstExploreFilterRun.current) {
-      isFirstExploreFilterRun.current = false;
+    if (scope === 'explore') return;
+    fetchBusinesses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation, deviceCoords, scope]);
+
+  // Search/category filters are applied server-side for every scope now, so
+  // a change re-fetches page 0 rather than re-filtering an in-memory array.
+  // Debounced so search-as-you-type doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
       return;
     }
-    const handle = setTimeout(() => { fetchExploreBusinesses(); }, 400);
+    const handle = setTimeout(() => { fetchBusinesses(); }, 400);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, activeCategory]);
 
-  function buildExploreBusinessesQuery() {
+  // Shared category/search filters, reused by both the plain Explore query
+  // and Home's location-matched one — Nearby uses the nearby_businesses RPC
+  // instead (see fetchBusinessesPage) since it needs real distance ranking.
+  function buildBusinessesQuery(locationFilter?: string) {
     let query = supabase.from('businesses').select('*, gallery:business_gallery(*)');
     if (activeCategory !== 'All') query = query.eq('category', activeCategory);
     if (searchQuery.trim()) query = query.ilike('name', `%${searchQuery.trim()}%`);
+    if (locationFilter) query = query.ilike('location', `%${locationFilter}%`);
     return query.order('created_at', { ascending: false });
   }
 
-  async function fetchExploreBusinesses() {
-    try {
-      if (exploreBusinesses.length === 0) setLoading(true);
-      const [from, to] = pageRange(0);
-      const { data, error } = await withRetry(() => buildExploreBusinessesQuery().range(from, to));
-      if (error) throw error;
-      if (data) {
-        setExploreBusinesses(data);
-        setPage(0);
-        setHasMore(data.length === PAGE_SIZE);
-      }
-    } catch (e: any) {
-      console.error('Explore businesses fetch error:', e.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  // Hydrates the (distance-ranked) ids the RPC returned into full business
+  // rows, preserving rank order and attaching _distanceKm for display.
+  async function hydrateNearbyIds(ranked: { id: string; distance_km: number }[]) {
+    if (ranked.length === 0) return [];
+    const ids = ranked.map(r => r.id);
+    const distanceById = new Map(ranked.map(r => [r.id, r.distance_km]));
+    const { data, error } = await supabase.from('businesses').select('*, gallery:business_gallery(*)').in('id', ids);
+    if (error) throw error;
+    return ids
+      .map(id => {
+        const biz = data?.find((b: any) => b.id === id);
+        return biz ? { ...biz, _distanceKm: distanceById.get(id) } : null;
+      })
+      .filter(Boolean);
   }
 
-  async function loadMoreExploreBusinesses() {
-    if (loadingMore || !hasMore || loading || scope !== 'explore') return;
-    try {
-      setLoadingMore(true);
-      const nextPage = page + 1;
-      const [from, to] = pageRange(nextPage);
-      const { data, error } = await withRetry(() => buildExploreBusinessesQuery().range(from, to));
+  async function fetchBusinessesPage(pageNum: number): Promise<any[]> {
+    const [from, to] = pageRange(pageNum);
+
+    if (scope === 'home') {
+      if (!myLocation) return [];
+      const { data, error } = await withRetry(() => buildBusinessesQuery(myLocation).range(from, to));
       if (error) throw error;
-      if (data) {
-        setExploreBusinesses(prev => [...prev, ...data]);
-        setPage(nextPage);
-        setHasMore(data.length === PAGE_SIZE);
-      }
-    } catch (e: any) {
-      console.error('Explore businesses load-more error:', e.message);
-    } finally {
-      setLoadingMore(false);
+      return data || [];
     }
+
+    if (scope === 'nearby') {
+      if (deviceCoords) {
+        const { data, error } = await withRetry(() => supabase.rpc('nearby_businesses', {
+          p_lat: deviceCoords.latitude,
+          p_lng: deviceCoords.longitude,
+          p_radius_km: NEARBY_RADIUS_KM,
+          p_category: activeCategory !== 'All' ? activeCategory : null,
+          p_search: searchQuery.trim() || null,
+          p_limit: PAGE_SIZE,
+          p_offset: from,
+        }));
+        if (error) throw error;
+        return hydrateNearbyIds(data || []);
+      }
+      // GPS denied/unavailable — fall back to the Home-style text match.
+      if (myLocation) {
+        const { data, error } = await withRetry(() => buildBusinessesQuery(myLocation).range(from, to));
+        if (error) throw error;
+        return data || [];
+      }
+      return [];
+    }
+
+    // explore
+    const { data, error } = await withRetry(() => buildBusinessesQuery().range(from, to));
+    if (error) throw error;
+    return data || [];
   }
 
   async function fetchBusinesses() {
     try {
-      if (!refreshing) setLoading(true);
-      const { data, error } = await withRetry(() => supabase
-        .from('businesses')
-        .select('*, gallery:business_gallery(*)')
-        .order('created_at', { ascending: false }));
-
-      if (error) throw error;
-      if (data) {
-        setBusinesses(data);
-        setFilteredBusinesses(data);
-      }
+      if (businesses.length === 0) setLoading(true);
+      const data = await fetchBusinessesPage(0);
+      setBusinesses(data);
+      setPage(0);
+      setHasMore(data.length === PAGE_SIZE);
     } catch (e: any) {
-      console.error("Directory fetch error:", e.message);
+      console.error('Businesses fetch error:', e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }
 
-  const applyFilters = () => {
-    let result = [...businesses];
-
-    if (scope === 'home') {
-      if (!myLocation) {
-        setFilteredBusinesses([]);
-        return;
-      }
-      result = result.filter(b => b.location?.toLowerCase().includes(myLocation.toLowerCase()));
-    } else if (scope === 'nearby') {
-      if (deviceCoords) {
-        // Real distance ranking — only listings with saved coordinates can participate.
-        result = result
-          .filter(b => b.latitude != null && b.longitude != null)
-          .map(b => ({
-            ...b,
-            _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, b.latitude, b.longitude),
-          }))
-          .sort((a, b) => a._distanceKm - b._distanceKm);
-      } else if (myLocation) {
-        // GPS denied/unavailable — fall back to the Home-style text match.
-        result = result.filter(b => b.location?.toLowerCase().includes(myLocation.toLowerCase()));
-      } else {
-        setFilteredBusinesses([]);
-        return;
-      }
+  async function loadMoreBusinesses() {
+    if (loadingMore || !hasMore || loading) return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const data = await fetchBusinessesPage(nextPage);
+      setBusinesses(prev => [...prev, ...data]);
+      setPage(nextPage);
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (e: any) {
+      console.error('Businesses load-more error:', e.message);
+    } finally {
+      setLoadingMore(false);
     }
-
-    if (activeCategory !== 'All') result = result.filter(b => b.category === activeCategory);
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(b => b.name.toLowerCase().includes(q) || b.location.toLowerCase().includes(q));
-    }
-    setFilteredBusinesses(result);
-  };
+  }
 
   const handleOpenLink = async (url: string) => {
     if (!url) return;
@@ -314,7 +299,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       }
 
       setModalVisible(false);
-      refreshBusinesses();
+      fetchBusinesses();
 
       // Full Form Reset
       setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', website_url: '', logoUri: null, coverPhotoUri: null, latitude: null, longitude: null });
@@ -341,7 +326,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       setGalleryModalVisible(false);
       setGalleryImageUri(null);
       setGalleryLabel('');
-      refreshBusinesses();
+      fetchBusinesses();
     } catch (e: any) {
       Alert.alert('Upload Failed', e.message);
     } finally {
@@ -354,7 +339,7 @@ export default function BusinessScreen({ navigation, route }: any) {
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
           await supabase.from('businesses').delete().eq('id', bizId);
-          refreshBusinesses();
+          fetchBusinesses();
       }}
     ]);
   };
@@ -521,16 +506,16 @@ export default function BusinessScreen({ navigation, route }: any) {
         <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
       ) : (
         <FlatList
-          data={scope === 'explore' ? exploreBusinesses : filteredBusinesses}
+          data={businesses}
           keyExtractor={(item) => item.id}
           renderItem={renderBusinessCard}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-          onRefresh={() => { setRefreshing(true); refreshBusinesses(); }}
+          onRefresh={() => { setRefreshing(true); fetchBusinesses(); }}
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
-          onEndReached={scope === 'explore' ? loadMoreExploreBusinesses : undefined}
+          onEndReached={loadMoreBusinesses}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={scope === 'explore' && loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <EmptyState
