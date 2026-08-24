@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Image } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { supabase } from '../../lib/supabase';
-import * as ImagePicker from 'expo-image-picker';
-import { compressImage } from '../../lib/mediaCompression';
+import { pickAndUploadImage } from '../../lib/imageUpload';
 import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
+import { ModalSheet, CategoryPicker } from '../../components/ui';
+import { colors, radii, spacing, typography } from '../../theme';
 
 export default function EditBusinessModal({ visible, onClose, business, onUpdate }: any) {
   const [loading, setLoading] = useState(false);
@@ -20,46 +20,21 @@ export default function EditBusinessModal({ visible, onClose, business, onUpdate
   });
 
   const uploadImage = async (type: 'logo' | 'cover') => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: type === 'logo' ? [1, 1] : [16, 9],
-      quality: 0.7,
-    });
-
-    if (result.canceled || !result.assets[0].uri) return;
-
     setLoading(true);
     try {
-      const compressed = await compressImage(result.assets[0].uri, {
-        maxDimension: type === 'logo' ? 800 : 1600,
-      });
-      const fileExt = 'jpg';
-      const fileName = `${type}-${business.id}-${Date.now()}.${fileExt}`;
+      const publicUrl = await pickAndUploadImage(
+        { aspect: type === 'logo' ? [1, 1] : [16, 9] },
+        { fileNamePrefix: `${type}-${business.id}`, maxDimension: type === 'logo' ? 800 : 1600 }
+      );
+      if (!publicUrl) return;
 
-      // CRITICAL FIX: Use FormData instead of fetch().blob() to prevent 0-byte uploads
-      const formData = new FormData();
-      formData.append('file', {
-        uri: compressed.uri,
-        name: fileName,
-        type: 'image/jpeg'
-      } as any);
-      
-      const { error: uploadError } = await supabase.storage
-        .from('Listings')
-        .upload(fileName, formData);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage.from('Listings').getPublicUrl(fileName);
-      
       const { error: dbError } = await supabase
         .from('businesses')
         .update({ [type === 'logo' ? 'logo_url' : 'cover_photo_url']: publicUrl })
         .eq('id', business.id);
 
       if (dbError) throw dbError;
-      
+
       onUpdate();
       Alert.alert("Success", `${type === 'logo' ? 'Logo' : 'Cover'} updated!`);
     } catch (e: any) {
@@ -83,12 +58,12 @@ export default function EditBusinessModal({ visible, onClose, business, onUpdate
       Alert.alert("Invalid Email", "Please enter a valid business email address.");
       return false;
     }
-    
+
     if (formData.whatsapp_number && !phoneRegex.test(formData.whatsapp_number.replace(/\s/g, ''))) {
       Alert.alert("Invalid WhatsApp", "Please enter a valid WhatsApp number (e.g. 0821234567).");
       return false;
     }
-    
+
     if (formData.contact_phone && !phoneRegex.test(formData.contact_phone.replace(/\s/g, ''))) {
       Alert.alert("Invalid Phone", "Please enter a valid phone number.");
       return false;
@@ -119,114 +94,72 @@ export default function EditBusinessModal({ visible, onClose, business, onUpdate
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={true}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Edit Business</Text>
-            <TouchableOpacity onPress={onClose}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
-          </View>
-          
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {/* Branding Upload Section */}
-            <View style={styles.brandingSection}>
-              <TouchableOpacity style={styles.uploadBtn} onPress={() => uploadImage('logo')}>
-                <Text style={styles.uploadBtnText}>Update Logo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.uploadBtn} onPress={() => uploadImage('cover')}>
-                <Text style={styles.uploadBtnText}>Update Cover</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.label}>Business Name</Text>
-            <TextInput style={styles.input} value={formData.name} onChangeText={(t) => setFormData({...formData, name: t})} />
-
-            <Text style={styles.label}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-              {BUSINESS_CATEGORIES.map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.categoryPill, formData.category === cat && styles.categoryPillActive]}
-                  onPress={() => setFormData({...formData, category: cat})}
-                >
-                  <Text style={[styles.categoryPillText, formData.category === cat && styles.categoryPillTextActive]}>{cat}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.label}>Location</Text>
-            <TextInput style={styles.input} value={formData.location} onChangeText={(t) => setFormData({...formData, location: t})} />
-            
-            <Text style={styles.label}>Description</Text>
-            <TextInput style={[styles.input, {height: 80, textAlignVertical: 'top'}]} multiline value={formData.description} onChangeText={(t) => setFormData({...formData, description: t})} />
-            
-            <Text style={styles.label}>Contact Phone</Text>
-            <TextInput style={styles.input} keyboardType="phone-pad" value={formData.contact_phone} onChangeText={(t) => setFormData({...formData, contact_phone: t})} />
-
-            <Text style={styles.label}>WhatsApp Number</Text>
-            <TextInput style={styles.input} keyboardType="phone-pad" value={formData.whatsapp_number} onChangeText={(t) => setFormData({...formData, whatsapp_number: t})} />
-
-            <Text style={styles.label}>Contact Email</Text>
-            <TextInput style={styles.input} keyboardType="email-address" autoCapitalize="none" value={formData.contact_email} onChangeText={(t) => setFormData({...formData, contact_email: t})} />
-
-            <Text style={styles.label}>Website URL</Text>
-            <TextInput style={styles.input} keyboardType="url" autoCapitalize="none" value={formData.website_url} onChangeText={(t) => setFormData({...formData, website_url: t})} />
-
-            <TouchableOpacity style={styles.saveButton} onPress={handleUpdate} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
-            </TouchableOpacity>
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </View>
+    <ModalSheet visible={visible} onClose={onClose} title="Edit Business">
+      <View style={styles.brandingSection}>
+        <TouchableOpacity style={styles.uploadBtn} onPress={() => uploadImage('logo')}>
+          <Text style={styles.uploadBtnText}>Update Logo</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.uploadBtn} onPress={() => uploadImage('cover')}>
+          <Text style={styles.uploadBtnText}>Update Cover</Text>
+        </TouchableOpacity>
       </View>
-    </Modal>
+
+      <Text style={styles.label}>Business Name</Text>
+      <TextInput style={styles.input} value={formData.name} onChangeText={(t) => setFormData({...formData, name: t})} />
+
+      <Text style={styles.label}>Category</Text>
+      <CategoryPicker
+        categories={BUSINESS_CATEGORIES}
+        selected={formData.category}
+        onSelect={(cat) => setFormData({...formData, category: cat})}
+        style={{ paddingHorizontal: 0 }}
+      />
+
+      <Text style={styles.label}>Location</Text>
+      <TextInput style={styles.input} value={formData.location} onChangeText={(t) => setFormData({...formData, location: t})} />
+
+      <Text style={styles.label}>Description</Text>
+      <TextInput style={[styles.input, {height: 80, textAlignVertical: 'top'}]} multiline value={formData.description} onChangeText={(t) => setFormData({...formData, description: t})} />
+
+      <Text style={styles.label}>Contact Phone</Text>
+      <TextInput style={styles.input} keyboardType="phone-pad" value={formData.contact_phone} onChangeText={(t) => setFormData({...formData, contact_phone: t})} />
+
+      <Text style={styles.label}>WhatsApp Number</Text>
+      <TextInput style={styles.input} keyboardType="phone-pad" value={formData.whatsapp_number} onChangeText={(t) => setFormData({...formData, whatsapp_number: t})} />
+
+      <Text style={styles.label}>Contact Email</Text>
+      <TextInput style={styles.input} keyboardType="email-address" autoCapitalize="none" value={formData.contact_email} onChangeText={(t) => setFormData({...formData, contact_email: t})} />
+
+      <Text style={styles.label}>Website URL</Text>
+      <TextInput style={styles.input} keyboardType="url" autoCapitalize="none" value={formData.website_url} onChangeText={(t) => setFormData({...formData, website_url: t})} />
+
+      <TouchableOpacity style={styles.saveButton} onPress={handleUpdate} disabled={loading}>
+        {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
+      </TouchableOpacity>
+    </ModalSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.5)', 
-    justifyContent: 'flex-end' 
+  label: { ...typography.bodyMedium, color: colors.slate[700], marginBottom: spacing.sm, marginTop: spacing.md },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    fontSize: 15,
+    color: colors.textPrimary,
+    backgroundColor: colors.backgroundMuted,
   },
-  modalContent: { 
-    backgroundColor: '#fff', 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    padding: 24, 
-    maxHeight: '90%' 
+  brandingSection: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm },
+  uploadBtn: { backgroundColor: colors.backgroundMuted, padding: spacing.md + 2, borderRadius: radii.md, flex: 0.48, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  uploadBtnText: { ...typography.bodyMedium, color: colors.textPrimary },
+  saveButton: {
+    backgroundColor: colors.brand,
+    paddingVertical: spacing.lg,
+    borderRadius: radii.lg,
+    alignItems: 'center',
+    marginTop: spacing.xxl,
   },
-  modalHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 20 
-  },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  label: { fontSize: 14, fontWeight: '700', color: '#334155', marginBottom: 8, marginTop: 12 },
-  input: { 
-    borderWidth: 1, 
-    borderColor: '#E2E8F0', 
-    borderRadius: 12, 
-    padding: 12, 
-    fontSize: 15, 
-    color: '#1E293B',
-    backgroundColor: '#F8FAFC'
-  },
-  brandingSection: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  categoryScroll: { paddingBottom: 4 },
-  categoryPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F1F5F9', marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  categoryPillActive: { backgroundColor: '#1E293B', borderColor: '#1E293B' },
-  categoryPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  categoryPillTextActive: { color: '#fff' },
-  uploadBtn: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 12, flex: 0.48, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
-  uploadBtnText: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
-  saveButton: { 
-    backgroundColor: '#34C759', 
-    paddingVertical: 16, 
-    borderRadius: 16, 
-    alignItems: 'center', 
-    marginTop: 24 
-  },
-  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' }
+  saveButtonText: { color: colors.white, fontSize: 16, fontWeight: '700' },
 });

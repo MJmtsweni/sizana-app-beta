@@ -1,13 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
-  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
-  ScrollView, Keyboard, TouchableWithoutFeedback, Linking
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Image,
+  TextInput, ActivityIndicator, Platform, Alert,
+  ScrollView, Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../../lib/supabase'; // Adjust path if necessary
 import { useUserLocation } from '../../hooks/useUserLocation';
@@ -15,10 +14,11 @@ import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
 import { getDistanceKm, formatDistance } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
-import { compressImage } from '../../lib/mediaCompression';
+import { pickImage as pickImageHelper, uploadImageToStorage } from '../../lib/imageUpload';
 import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
 import { withRetry } from '../../lib/network';
 import { PAGE_SIZE, pageRange } from '../../lib/pagination';
+import { CategoryPicker, EmptyState, ModalSheet } from '../../components/ui';
 import EditBusinessModalScreen from './EditBusinessModalScreen';
 
 export default function BusinessScreen({ navigation, route }: any) {
@@ -233,14 +233,14 @@ export default function BusinessScreen({ navigation, route }: any) {
     handleOpenLink(`whatsapp://send?phone=${cleanPhone}`);
   };
 
-  async function pickImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.6 });
-    if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, logoUri: result.assets[0].uri });
+  async function pickLogoImage() {
+    const uri = await pickImageHelper({ aspect: [1, 1], quality: 0.6 });
+    if (uri) setNewBiz({ ...newBiz, logoUri: uri });
   }
 
   async function pickCoverPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [16, 9], quality: 0.8 });
-    if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, coverPhotoUri: result.assets[0].uri });
+    const uri = await pickImageHelper({ aspect: [16, 9], quality: 0.8 });
+    if (uri) setNewBiz({ ...newBiz, coverPhotoUri: uri });
   }
 
   // --- REGISTRATION VALIDATION ---
@@ -281,28 +281,12 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       // 1. Upload Logo if exists
       if (newBiz.logoUri) {
-        const compressedLogo = await compressImage(newBiz.logoUri, { maxDimension: 800 });
-        const fileExt = 'jpg';
-        const fileName = `biz-${Date.now()}.${fileExt}`;
-        const formData = new FormData();
-        formData.append('file', { uri: compressedLogo.uri, name: fileName, type: `image/${fileExt}` } as any);
-        const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
-        if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
-        finalLogoUrl = data.publicUrl;
+        finalLogoUrl = await uploadImageToStorage(newBiz.logoUri, { fileNamePrefix: 'biz', maxDimension: 800 });
       }
 
       // 2. Upload Cover Photo if exists
       if (newBiz.coverPhotoUri) {
-        const compressedCover = await compressImage(newBiz.coverPhotoUri, { maxDimension: 1600 });
-        const fileExt = 'jpg';
-        const fileName = `cover-${Date.now()}.${fileExt}`;
-        const formData = new FormData();
-        formData.append('file', { uri: compressedCover.uri, name: fileName, type: `image/${fileExt}` } as any);
-        const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
-        if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
-        finalCoverUrl = data.publicUrl;
+        finalCoverUrl = await uploadImageToStorage(newBiz.coverPhotoUri, { fileNamePrefix: 'cover', maxDimension: 1600 });
       }
 
       // 3. Insert Database Record
@@ -348,19 +332,10 @@ export default function BusinessScreen({ navigation, route }: any) {
     if (!galleryImageUri || !activeBusinessId) return;
     try {
       setUploadingGallery(true);
-      const compressedGalleryImage = await compressImage(galleryImageUri, { maxDimension: 1600 });
-      const fileExt = 'jpg';
-      const fileName = `gallery-${Date.now()}.${fileExt}`;
-      const formData = new FormData();
-      formData.append('file', { uri: compressedGalleryImage.uri, name: fileName, type: `image/${fileExt}` } as any);
-      
-      const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
-      if (uploadError) throw uploadError;
-      
-      const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
-      
+      const publicUrl = await uploadImageToStorage(galleryImageUri, { fileNamePrefix: 'gallery', maxDimension: 1600 });
+
       await supabase.from('business_gallery').insert({
-        business_id: activeBusinessId, media_url: data.publicUrl, label: galleryLabel
+        business_id: activeBusinessId, media_url: publicUrl, label: galleryLabel
       });
 
       setGalleryModalVisible(false);
@@ -539,13 +514,7 @@ export default function BusinessScreen({ navigation, route }: any) {
           <Ionicons name="search" size={20} color="#94A3B8" style={styles.searchIcon} />
           <TextInput style={styles.searchInput} placeholder="Search businesses..." value={searchQuery} onChangeText={setSearchQuery} />
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-          {filterCategories.map(cat => (
-            <TouchableOpacity key={cat} style={[styles.categoryPill, activeCategory === cat && styles.categoryPillActive]} onPress={() => setActiveCategory(cat)}>
-              <Text style={[styles.categoryPillText, activeCategory === cat && styles.categoryPillTextActive]}>{cat}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <CategoryPicker categories={filterCategories} selected={activeCategory} onSelect={setActiveCategory} />
       </View>
 
       {loading && !refreshing ? (
@@ -564,45 +533,29 @@ export default function BusinessScreen({ navigation, route }: any) {
           ListFooterComponent={scope === 'explore' && loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
-              <View style={styles.emptyLayout}>
-                <Ionicons name="location-outline" size={60} color="#CBD5E1" />
-                <Text style={styles.emptyText}>Set your location on your profile to see businesses at home.</Text>
-                <TouchableOpacity style={styles.setLocationButton} onPress={() => navigation.navigate('Profile', { session })}>
-                  <Text style={styles.setLocationButtonText}>Go to Profile</Text>
-                </TouchableOpacity>
-              </View>
+              <EmptyState
+                icon="location-outline"
+                title="Set your location on your profile to see businesses at home."
+                actionLabel="Go to Profile"
+                onAction={() => navigation.navigate('Profile', { session })}
+              />
             ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
-              <View style={styles.emptyLayout}>
-                <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
-                <Text style={styles.emptyText}>Enable location access, or set your profile location, to see nearby businesses.</Text>
-              </View>
+              <EmptyState
+                icon="navigate-outline"
+                title="Enable location access, or set your profile location, to see nearby businesses."
+              />
             ) : (
-              <View style={styles.emptyLayout}>
-                <Ionicons name="briefcase-outline" size={60} color="#CBD5E1" />
-                <Text style={styles.emptyText}>
-                  {scope === 'home' ? `No businesses found at home in ${myLocation}.` : scope === 'nearby' ? 'No businesses found nearby.' : 'No businesses found.'}
-                </Text>
-              </View>
+              <EmptyState
+                icon="briefcase-outline"
+                title={scope === 'home' ? `No businesses found at home in ${myLocation}.` : scope === 'nearby' ? 'No businesses found nearby.' : 'No businesses found.'}
+              />
             )
           }
         />
       )}
 
       {/* REGISTRATION MODAL */}
-      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-            style={styles.modalContent} 
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Register Business</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}> 
-              
+      <ModalSheet visible={modalVisible} onClose={() => setModalVisible(false)} title="Register Business">
               {/* COVER PHOTO UPLOAD */}
               <TouchableOpacity 
                 style={[styles.imageSelector, { width: '100%', height: 120, marginBottom: 16, borderRadius: 12 }]} 
@@ -619,7 +572,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               </TouchableOpacity>
 
               <View style={styles.imagePickerRow}>
-                <TouchableOpacity style={styles.imageSelector} onPress={pickImage}>
+                <TouchableOpacity style={styles.imageSelector} onPress={pickLogoImage}>
                   {newBiz.logoUri ? <Image source={{ uri: newBiz.logoUri }} style={styles.selectedLogo} /> : <><Ionicons name="image-outline" size={28} color="#94A3B8" /><Text style={styles.imagePlaceholderText}>Upload Logo</Text></>}
                 </TouchableOpacity>
                 <View style={{ flex: 1, paddingLeft: 16 }}>
@@ -630,17 +583,12 @@ export default function BusinessScreen({ navigation, route }: any) {
 
               {/* INTERACTIVE CATEGORY SELECTOR UX */}
               <Text style={styles.inputLabel}>Category</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-                {formCategories.map(cat => (
-                  <TouchableOpacity 
-                    key={cat} 
-                    style={[styles.categoryPill, newBiz.category === cat && styles.categoryPillActive, { marginRight: 8, marginBottom: 0 }]} 
-                    onPress={() => setNewBiz({...newBiz, category: cat})}
-                  >
-                    <Text style={[styles.categoryPillText, newBiz.category === cat && styles.categoryPillTextActive]}>{cat}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <CategoryPicker
+                categories={formCategories}
+                selected={newBiz.category}
+                onSelect={(cat) => setNewBiz({...newBiz, category: cat})}
+                style={{ paddingHorizontal: 0, marginBottom: 16 }}
+              />
 
               <Text style={styles.inputLabel}>Website (Optional)</Text>
               <TextInput style={styles.inputField} placeholder="www.example.com" keyboardType="url" autoCapitalize="none" value={newBiz.website_url} onChangeText={t => setNewBiz({...newBiz, website_url: t})} />
@@ -714,31 +662,19 @@ export default function BusinessScreen({ navigation, route }: any) {
               <TouchableOpacity style={styles.publishButton} onPress={handleRegisterBusiness} disabled={uploading}>
                 {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Register Business</Text>}
               </TouchableOpacity>
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      </ModalSheet>
 
       {/* GALLERY UPLOAD MODAL (UX Wrapper applied) */}
-      <Modal animationType="fade" transparent={true} visible={galleryModalVisible} onRequestClose={() => setGalleryModalVisible(false)}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-              style={styles.modalContent} 
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
-            >
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Add to Portfolio</Text>
-                <TouchableOpacity onPress={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
-              </View>
-              <TouchableOpacity 
-                style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]} 
+      <ModalSheet
+        visible={galleryModalVisible}
+        onClose={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}
+        title="Add to Portfolio"
+      >
+              <TouchableOpacity
+                style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]}
                 onPress={async () => {
-                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
-                  if (!result.canceled) setGalleryImageUri(result.assets[0].uri);
+                  const localUri = await pickImageHelper({ allowsEditing: false, quality: 0.7 });
+                  if (localUri) setGalleryImageUri(localUri);
                 }}
               >
                 {galleryImageUri ? <Image source={{ uri: galleryImageUri }} style={styles.selectedLogo} /> : <Text style={styles.imagePlaceholderText}>Tap to select image</Text>}
@@ -748,10 +684,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               <TouchableOpacity style={styles.publishButton} onPress={handleAddGalleryItem} disabled={uploadingGallery || !galleryImageUri}>
                 {uploadingGallery ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
               </TouchableOpacity>
-            </KeyboardAvoidingView>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      </ModalSheet>
 
       {editingBusiness && (
         <EditBusinessModalScreen
@@ -774,11 +707,6 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', marginHorizontal: 20, borderRadius: 12, paddingHorizontal: 16, height: 44, marginBottom: 16 },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, color: '#1E293B', fontWeight: '500' },
-  categoryScroll: { paddingHorizontal: 20, paddingBottom: 6 },
-  categoryPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F1F5F9', marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  categoryPillActive: { backgroundColor: '#1E293B', borderColor: '#1E293B' },
-  categoryPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  categoryPillTextActive: { color: '#fff' },
   
   bizCard: { backgroundColor: '#fff', borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   cardCoverImage: { width: '100%', height: 120, resizeMode: 'cover' },
@@ -802,16 +730,8 @@ const styles = StyleSheet.create({
   cardFooter: { padding: 16, paddingTop: 0 },
   messageButton: { flexDirection: 'row', backgroundColor: '#34C759', paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   messageButtonText: { fontSize: 15, fontWeight: '700', color: '#fff', marginLeft: 8 },
-  emptyLayout: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
-  setLocationButton: { backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
-  setLocationButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '95%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
   sectionHeader: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginTop: 8, marginBottom: 12 },
   imagePickerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   imageSelector: { width: 80, height: 80, borderRadius: 16, backgroundColor: '#F8FAFC', borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },

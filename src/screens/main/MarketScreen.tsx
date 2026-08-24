@@ -12,6 +12,7 @@ import ListingDetailsModal from './ListingDetailsModal';
 import { compressImage } from '../../lib/mediaCompression';
 import { withRetry } from '../../lib/network';
 import { PAGE_SIZE, pageRange } from '../../lib/pagination';
+import { CategoryPicker, EmptyState } from '../../components/ui';
 
 const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 40) / 2;
@@ -460,20 +461,10 @@ export default function MarketScreen({ route, session: directSession, navigation
       </View>
 
       <View style={{ maxHeight: 50, marginBottom: 6 }}>
-        <FlatList
-          data={CATEGORY_MAP[listingType]}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoriesContainer}
-          keyExtractor={(item) => item}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.categoryPill, selectedCategory === item && styles.categoryPillActive]}
-              onPress={() => setSelectedCategory(item)}
-            >
-              <Text style={[styles.categoryText, selectedCategory === item && styles.categoryTextActive]}>{item}</Text>
-            </TouchableOpacity>
-          )}
+        <CategoryPicker
+          categories={CATEGORY_MAP[listingType]}
+          selected={selectedCategory}
+          onSelect={setSelectedCategory}
         />
       </View>
 
@@ -493,10 +484,10 @@ export default function MarketScreen({ route, session: directSession, navigation
           onEndReachedThreshold={0.5}
           ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="alert-circle-outline" size={50} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No {LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()} found here.</Text>
-            </View>
+            <EmptyState
+              icon="alert-circle-outline"
+              title={`No ${LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()} found here.`}
+            />
           }
         />
       )}
@@ -637,11 +628,6 @@ const styles = StyleSheet.create({
   searchBarContainer: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', height: 46 },
   searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, height: '100%', fontSize: 14, color: '#334155', fontWeight: '500' },
-  categoriesContainer: { paddingHorizontal: 14, paddingVertical: 4 },
-  categoryPill: { backgroundColor: '#E2E8F0', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, height: 36, justifyContent: 'center' },
-  categoryPillActive: { backgroundColor: '#34C759' },
-  categoryText: { fontSize: 13, color: '#475569', fontWeight: '700' },
-  categoryTextActive: { color: '#fff' },
   gridContainer: { padding: 14, paddingBottom: 100 },
   gridColumnWrapper: { justifyContent: 'space-between' },
   card: { backgroundColor: '#fff', width: COLUMN_WIDTH, borderRadius: 20, marginBottom: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 8 },
@@ -658,8 +644,6 @@ const styles = StyleSheet.create({
   cardLocation: { fontSize: 12, color: '#94A3B8', marginLeft: 4, fontWeight: '500', flex: 1 },
   fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: '#34C759', flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, alignItems: 'center', elevation: 5, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
   fabText: { color: '#fff', fontSize: 16, fontWeight: '700', marginLeft: 6 },
-  emptyContainer: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 15, fontWeight: '600', marginTop: 12 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
