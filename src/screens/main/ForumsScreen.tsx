@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
   TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
@@ -12,15 +12,23 @@ import { supabase } from '../../lib/supabase';
 import { useUserLocation } from '../../hooks/useUserLocation';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
-import { getDistanceKm, formatDistance } from '../../lib/distance';
+import { formatDistance, NEARBY_RADIUS_KM } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
+import { colors, fontFamily } from '../../theme';
 export default function ForumsScreen({ navigation, route, session: directSession }: any) {
   const session = route?.params?.session || directSession;
   const insets = useSafeAreaInsets();
 
-  // Feed States
+  // Feed States — one paginated dataset serves all three scopes; which
+  // query builds each page (see fetchPostsPage) is what changes.
   const [posts, setPosts] = useState<any[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [scope, setScope] = useState<Scope>('explore');
   const { coords: deviceCoords, status: deviceLocationStatus } = useDeviceLocation();
   const { capturing: capturingLocation, captureLocation } = useLocationCapture();
@@ -65,94 +73,178 @@ export default function ForumsScreen({ navigation, route, session: directSession
   useFocusEffect(
     useCallback(() => {
       fetchPosts();
-      fetchUserBusinesses(); 
-    }, [session?.user?.id])
+      fetchUserBusinesses();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session?.user?.id, scope])
   );
+
+  // Location/GPS resolving asynchronously after mount needs its own
+  // trigger — Home/Nearby depend on it but it isn't known yet when the
+  // focus effect above first runs.
+  useEffect(() => {
+    if (scope === 'explore') return;
+    fetchPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation, deviceCoords, scope]);
+
+  async function getUserInterests(): Promise<string[]> {
+    const { data: userData } = await supabase
+      .from('users')
+      .select('interests')
+      .eq('id', session.user.id)
+      .single();
+
+    let interestsArray: string[] = [];
+    if (userData?.interests) {
+      if (Array.isArray(userData.interests)) interestsArray = userData.interests;
+      else if (typeof userData.interests === 'string') {
+        try { interestsArray = JSON.parse(userData.interests); }
+        catch { interestsArray = userData.interests.split(',').map((t: string) => t.trim()); }
+      }
+    }
+    return interestsArray;
+  }
+
+  // Hydrates the (ranked) post ids the RPC returned into full post rows +
+  // social metadata, preserving the RPC's rank order.
+  async function hydratePostIds(postIds: string[]) {
+    const { data, error } = await supabase
+      .from('forum_posts')
+      .select(`
+        *,
+        author:author_id (*),
+        business:business_id (*),
+        likes:forum_likes ( user_id ),
+        follows:forum_follows ( user_id ),
+        comments:forum_comments ( id )
+      `)
+      .in('id', postIds);
+
+    if (error) throw error;
+
+    const authorIds = [...new Set(data.map(p => p.author_id).filter(Boolean))];
+    const { data: friendData } = await supabase
+      .from('user_friends')
+      .select('user_id_1, user_id_2')
+      .eq('status', 'accepted')
+      .or(`user_id_1.in.(${authorIds}),user_id_2.in.(${authorIds})`);
+
+    const { data: followerData } = await supabase
+      .from('user_followers')
+      .select('following_id')
+      .eq('follower_id', session.user.id)
+      .in('following_id', authorIds);
+
+    const friendSet = new Set(friendData?.flatMap(f => [f.user_id_1, f.user_id_2]).filter(id => id !== session.user.id));
+    const followingSet = new Set(followerData?.map(f => f.following_id));
+
+    return postIds.map((id: string) => {
+      const post = data.find(p => p.id === id);
+      if (!post) return null;
+      return {
+        ...post,
+        likesCount: post.likes.length,
+        isLiked: post.likes.some((like: any) => like.user_id === session?.user?.id),
+        isFollowing: post.follows.some((follow: any) => follow.user_id === session?.user?.id),
+        isFollowingAuthor: followingSet.has(post.author_id),
+        isFriendWithAuthor: friendSet.has(post.author_id),
+        commentsCount: post.comments ? post.comments.length : 0
+      };
+    }).filter(Boolean);
+  }
+
+  // Home: text-match against the post's own saved location string. Legacy
+  // posts without one used to fall back to author/business location
+  // client-side — that fallback can't be pushed into a plain .ilike(), so
+  // it's a known, deliberate gap here (same simplification as Business/Market
+  // search matching one column rather than several joined ones).
+  async function fetchPostsPage(pageNum: number): Promise<any[]> {
+    const [from, to] = pageRange(pageNum);
+
+    if (scope === 'home') {
+      if (!myLocation) return [];
+      const { data, error } = await withRetry(() => supabase
+        .from('forum_posts')
+        .select('id')
+        .ilike('location', `%${myLocation}%`)
+        .order('created_at', { ascending: false })
+        .range(from, to));
+      if (error) throw error;
+      const ids = (data || []).map((p: any) => p.id);
+      return ids.length > 0 ? hydratePostIds(ids) : [];
+    }
+
+    if (scope === 'nearby') {
+      if (deviceCoords) {
+        const { data, error } = await withRetry(() => supabase.rpc('nearby_forum_posts', {
+          p_lat: deviceCoords.latitude,
+          p_lng: deviceCoords.longitude,
+          p_radius_km: NEARBY_RADIUS_KM,
+          p_limit: PAGE_SIZE,
+          p_offset: from,
+        }));
+        if (error) throw error;
+        const ranked = data || [];
+        if (ranked.length === 0) return [];
+        const distanceById = new Map(ranked.map((r: any) => [r.id, r.distance_km]));
+        const hydrated = await hydratePostIds(ranked.map((r: any) => r.id));
+        return hydrated.map((p: any) => ({ ...p, _distanceKm: distanceById.get(p.id) }));
+      }
+      // GPS denied/unavailable — fall back to the Home-style text match.
+      if (myLocation) {
+        const { data, error } = await withRetry(() => supabase
+          .from('forum_posts')
+          .select('id')
+          .ilike('location', `%${myLocation}%`)
+          .order('created_at', { ascending: false })
+          .range(from, to));
+        if (error) throw error;
+        const ids = (data || []).map((p: any) => p.id);
+        return ids.length > 0 ? hydratePostIds(ids) : [];
+      }
+      return [];
+    }
+
+    // explore — personalized feed
+    const interestsArray = await getUserInterests();
+    const { data: rpcData, error: rpcError } = await withRetry(() => supabase.rpc('get_personalized_feed', {
+      user_interests_param: interestsArray,
+      p_limit: PAGE_SIZE,
+      p_offset: from,
+    }));
+    if (rpcError) throw rpcError;
+    const postIds = (rpcData || []).map((p: any) => p.id);
+    return postIds.length > 0 ? hydratePostIds(postIds) : [];
+  }
 
   async function fetchPosts() {
     try {
-      if (!refreshing) setLoading(true);
-
-      // 1. Get User Interests
-      const { data: userData } = await supabase
-        .from('users')
-        .select('interests')
-        .eq('id', session.user.id)
-        .single();
-
-      // 2. Data transformation for RPC
-      let interestsArray = [];
-      if (userData?.interests) {
-        if (Array.isArray(userData.interests)) interestsArray = userData.interests;
-        else if (typeof userData.interests === 'string') {
-          try { interestsArray = JSON.parse(userData.interests); } 
-          catch { interestsArray = userData.interests.split(',').map((t: string) => t.trim()); }
-        }
-      }
-
-      // 3. Personalized Fetch via RPC
-      const { data: rpcData, error: rpcError } = await supabase.rpc('get_personalized_feed', { 
-        user_interests_param: interestsArray 
-      });
-
-      if (rpcError) throw rpcError;
-
-      if (rpcData && rpcData.length > 0) {
-        const postIds = rpcData.map((p: any) => p.id);
-        const { data, error } = await supabase
-          .from('forum_posts')
-          .select(`
-            *,
-            author:author_id (*),
-            business:business_id (*),
-            likes:forum_likes ( user_id ),
-            follows:forum_follows ( user_id ),
-            comments:forum_comments ( id )
-          `)
-          .in('id', postIds);
-
-        if (error) throw error;
-
-        // Fetch social statuses for authors
-        const authorIds = [...new Set(data.map(p => p.author_id).filter(Boolean))];
-        const { data: friendData } = await supabase
-          .from('user_friends')
-          .select('user_id_1, user_id_2')
-          .eq('status', 'accepted')
-          .or(`user_id_1.in.(${authorIds}),user_id_2.in.(${authorIds})`);
-        
-        const { data: followerData } = await supabase
-          .from('user_followers')
-          .select('following_id')
-          .eq('follower_id', session.user.id)
-          .in('following_id', authorIds);
-
-        const friendSet = new Set(friendData?.flatMap(f => [f.user_id_1, f.user_id_2]).filter(id => id !== session.user.id));
-        const followingSet = new Set(followerData?.map(f => f.following_id));
-
-        const formattedPosts = postIds.map((id: string) => {
-          const post = data.find(p => p.id === id);
-          if (!post) return null;
-          return {
-            ...post,
-            likesCount: post.likes.length,
-            isLiked: post.likes.some((like: any) => like.user_id === session?.user?.id),
-            isFollowing: post.follows.some((follow: any) => follow.user_id === session?.user?.id),
-            isFollowingAuthor: followingSet.has(post.author_id),
-            isFriendWithAuthor: friendSet.has(post.author_id),
-            commentsCount: post.comments ? post.comments.length : 0
-          };
-        }).filter(Boolean);
-        
-        setPosts(formattedPosts);
-      } else {
-        setPosts([]);
-      }
+      if (posts.length === 0) setLoading(true);
+      const data = await fetchPostsPage(0);
+      setPosts(data);
+      setPage(0);
+      setHasMore(data.length === PAGE_SIZE);
     } catch (error: any) {
       console.error("Error fetching posts:", error.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }
+
+  async function loadMorePosts() {
+    if (loadingMore || !hasMore || loading) return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const data = await fetchPostsPage(nextPage);
+      setPosts(prev => [...prev, ...data]);
+      setPage(nextPage);
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (error: any) {
+      console.error("Error loading more posts:", error.message);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -179,8 +271,12 @@ export default function ForumsScreen({ navigation, route, session: directSession
     } catch (e: any) { Alert.alert("Error", e.message); }
   };
 
+  function updatePostInPlace(postId: string, updater: (p: any) => any) {
+    setPosts(prev => prev.map(p => p.id === postId ? updater(p) : p));
+  }
+
   const toggleLike = async (postId: string, currentlyLiked: boolean) => {
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, isLiked: !currentlyLiked, likesCount: currentlyLiked ? p.likesCount - 1 : p.likesCount + 1 } : p));
+    updatePostInPlace(postId, p => ({ ...p, isLiked: !currentlyLiked, likesCount: currentlyLiked ? p.likesCount - 1 : p.likesCount + 1 }));
     if (currentlyLiked) await supabase.from('forum_likes').delete().match({ post_id: postId, user_id: session.user.id });
     else await supabase.from('forum_likes').insert({ post_id: postId, user_id: session.user.id });
   };
@@ -190,7 +286,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
   // and DashboardScreen's "Active Forums" card both read from.
   const toggleFollowPost = async (postId: string, currentlyFollowing: boolean) => {
     // Optimistic UI update — bell reflects the tap immediately
-    setPosts(prev => prev.map(p => p.id === postId ? { ...p, isFollowing: !currentlyFollowing } : p));
+    updatePostInPlace(postId, p => ({ ...p, isFollowing: !currentlyFollowing }));
 
     try {
       if (currentlyFollowing) {
@@ -207,7 +303,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
       }
     } catch (e: any) {
       // Roll back if the write actually failed
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, isFollowing: currentlyFollowing } : p));
+      updatePostInPlace(postId, p => ({ ...p, isFollowing: currentlyFollowing }));
       Alert.alert('Error', 'Could not update follow status: ' + e.message);
     }
   };
@@ -242,10 +338,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
       setUploading(true);
       let finalMediaUrl = mediaUri; 
       if (mediaUri && !mediaUri.startsWith('http')) {
-        const fileExt = mediaUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressed = await compressImage(mediaUri, { maxDimension: 1600 });
+        const fileExt = 'jpg';
         const fileName = `post-${Date.now()}.${fileExt}`;
         const formData = new FormData();
-        formData.append('file', { uri: mediaUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressed.uri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
@@ -315,7 +412,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
       <View style={styles.postCard}>
         <View style={styles.postHeader}>
           <TouchableOpacity style={styles.authorRow} activeOpacity={0.7} onPress={() => handleProfilePress(item)}>
-            {displayAvatar ? <Image source={{ uri: displayAvatar }} style={styles.avatarImage} /> : <Ionicons name={item.business ? "briefcase" : "person-circle"} size={40} color="#CBD5E1" />}
+            {displayAvatar ? <Image source={{ uri: displayAvatar }} style={styles.avatarImage} /> : <Ionicons name={item.business ? "briefcase" : "person-circle"} size={40} color={colors.borderStrong} />}
             <View style={styles.authorDetails}>
   {/* Name and Plus Button Container */}
   <View style={styles.nameRow}>
@@ -336,21 +433,23 @@ export default function ForumsScreen({ navigation, route, session: directSession
           ]);
         }}
       >
-        <Ionicons name="add" size={14} color="#fff" />
+        <Ionicons name="add" size={14} color={colors.white} />
       </TouchableOpacity>
     )}
   </View>
   
   {/* Metadata Row remains below the name */}
   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-    <Text style={styles.postTopicBadge}>{item.topic}</Text>
-    <Text style={styles.postDateText}> • {formatTimestamp(item.created_at)}</Text>
-    {item._distanceKm != null ? (
-      <Text style={styles.postDateText}> • {formatDistance(item._distanceKm)}</Text>
-    ) : item.location ? (
-      <Text style={styles.postDateText}> • {item.location}</Text>
-    ) : null}
+    <Text style={styles.postTopicBadge} numberOfLines={1}>{item.topic}</Text>
+    <Text style={styles.postDateText} numberOfLines={1}>
+      {' '}• {formatTimestamp(item.created_at)}
+    </Text>
   </View>
+  {(item._distanceKm != null || item.location) && (
+    <Text style={styles.postLocationText} numberOfLines={1} ellipsizeMode="tail">
+      {item._distanceKm != null ? formatDistance(item._distanceKm) : item.location}
+    </Text>
+  )}
 </View>
           </TouchableOpacity>
 
@@ -362,7 +461,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
             <Ionicons
               name={item.isFollowing ? "notifications" : "notifications-outline"}
               size={16}
-              color={item.isFollowing ? "#fff" : "#34C759"}
+              color={item.isFollowing ? colors.white : colors.brand}
             />
           </TouchableOpacity>
         </View>
@@ -387,11 +486,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
         <View style={styles.postFooter}>
           <TouchableOpacity style={styles.actionButton} onPress={() => toggleLike(item.id, item.isLiked)}>
-            <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={22} color={item.isLiked ? "#EF4444" : "#64748B"} />
+            <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={22} color={item.isLiked ? colors.danger : colors.textSecondary} />
             <Text style={styles.actionText}>{item.likesCount}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Thread', { post: item, session })}>
-            <Ionicons name="chatbox-outline" size={20} color="#64748B" />
+            <Ionicons name="chatbox-outline" size={20} color={colors.textSecondary} />
             <Text style={styles.actionText}>{item.commentsCount}</Text>
           </TouchableOpacity>
         </View>
@@ -399,39 +498,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
     );
   }, [session]);
 
-  // Home: text-match against the poster's own saved location string (falls
-  // back to author/business location for any legacy post the SQL backfill missed).
-  // Nearby: real distance ranking using each post's own coordinates, when present;
-  // falls back to the Home-style text match if GPS is unavailable/denied.
-  let scopedPosts = posts;
-  if (scope === 'home') {
-    scopedPosts = myLocation
-      ? posts.filter((p) => {
-          const postLocation = p.location || (p.business_id ? p.business?.location : p.author?.location);
-          return postLocation?.toLowerCase().includes(myLocation.toLowerCase());
-        })
-      : [];
-  } else if (scope === 'nearby') {
-    if (deviceCoords) {
-      scopedPosts = posts
-        .filter((p) => p.latitude != null && p.longitude != null)
-        .map((p) => ({ ...p, _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, p.latitude, p.longitude) }))
-        .sort((a, b) => a._distanceKm - b._distanceKm);
-    } else if (myLocation) {
-      scopedPosts = posts.filter((p) => {
-        const postLocation = p.location || (p.business_id ? p.business?.location : p.author?.location);
-        return postLocation?.toLowerCase().includes(myLocation.toLowerCase());
-      });
-    } else {
-      scopedPosts = [];
-    }
-  }
-
   return (
     <View style={styles.mainContainer}>
       <View style={[styles.navPanel, { paddingTop: Math.max(insets.top, 45) }]}>
         <Text style={styles.navTitle}>Community Forums</Text>
-        <TouchableOpacity onPress={() => setCreateModalVisible(true)}><Ionicons name="create-outline" size={26} color="#34C759" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setCreateModalVisible(true)}><Ionicons name="create-outline" size={26} color={colors.brand} /></TouchableOpacity>
       </View>
 
       <ScopeToggle
@@ -447,41 +518,44 @@ export default function ForumsScreen({ navigation, route, session: directSession
       />
 
       <FlatList
-        data={scopedPosts}
+        data={posts}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderPostCard}
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         onRefresh={() => { setRefreshing(true); fetchPosts(); }}
         refreshing={refreshing}
+        onEndReached={loadMorePosts}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
         ListEmptyComponent={
           scope === 'home' && !myLocation ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
-              <Ionicons name="location-outline" size={60} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+              <Ionicons name="location-outline" size={60} color={colors.borderStrong} />
+              <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
                 Set your location on your profile to see posts at home.
               </Text>
               <TouchableOpacity
-                style={{ backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 }}
+                style={{ backgroundColor: colors.brand, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 }}
                 onPress={() => navigation.navigate('Profile', { session })}
               >
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Go to Profile</Text>
+                <Text style={{ color: colors.white, fontSize: 14, fontFamily: fontFamily.bold }}>Go to Profile</Text>
               </TouchableOpacity>
             </View>
           ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
-              <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+              <Ionicons name="navigate-outline" size={60} color={colors.borderStrong} />
+              <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
                 Enable location access, or set your profile location, to see nearby posts.
               </Text>
             </View>
           ) : scope === 'home' || scope === 'nearby' ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
-              <Ionicons name="chatbubbles-outline" size={60} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+              <Ionicons name="chatbubbles-outline" size={60} color={colors.borderStrong} />
+              <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
                 No posts found {scope === 'home' ? `at home in ${myLocation}` : 'nearby'} yet.
               </Text>
             </View>
-          ) : null
+          ) : undefined
         }
       />
 
@@ -491,7 +565,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent} keyboardVerticalOffset={60}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{editingPostId ? 'Edit Post' : 'Start a Topic'}</Text>
-                <TouchableOpacity onPress={() => { setCreateModalVisible(false); clearForm(); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setCreateModalVisible(false); clearForm(); }}><Ionicons name="close-circle" size={28} color={colors.textSecondary} /></TouchableOpacity>
               </View>
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
                 <Text style={styles.inputLabel}>Topic Category</Text>
@@ -504,7 +578,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TextInput style={[styles.titleInput, { flex: 1, marginRight: 8, marginBottom: 0 }]} value={newLocation} onChangeText={setNewLocation} placeholder="e.g. Ballito" />
                   <TouchableOpacity
-                    style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' }}
+                    style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.brandSubtle, borderWidth: 1, borderColor: colors.brandSubtleStrong, justifyContent: 'center', alignItems: 'center' }}
                     disabled={capturingLocation}
                     onPress={async () => {
                       const captured = await captureLocation();
@@ -515,7 +589,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
                       }
                     }}
                   >
-                    {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={18} color="#34C759" />}
+                    {capturingLocation ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={18} color={colors.brand} />}
                   </TouchableOpacity>
                 </View>
                 <View style={{ height: 16 }} />
@@ -534,61 +608,62 @@ export default function ForumsScreen({ navigation, route, session: directSession
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F1F5F9' },
+  mainContainer: { flex: 1, backgroundColor: colors.slate[100] },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  navTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  postCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 15, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
+  navTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  postCard: { backgroundColor: colors.white, borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   postHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  authorRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  authorRow: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   avatarImage: { width: 40, height: 40, borderRadius: 20 },
-  authorDetails: { marginLeft: 10, flex: 1, justifyContent: 'center' },
-  authorName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  postTopicBadge: { fontSize: 11, fontWeight: '700', color: '#3B82F6', marginTop: 2 },
-  plusButton: { backgroundColor: '#34C759', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
-  postTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
-  postBodyText: { fontSize: 14, color: '#475569', lineHeight: 22 },
+  authorDetails: { marginLeft: 10, flex: 1, minWidth: 0, justifyContent: 'center' },
+  postLocationText: { fontSize: 11, fontFamily: fontFamily.semibold, color: colors.textTertiary, marginTop: 2 },
+  authorName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  postTopicBadge: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.accent, marginTop: 2 },
+  plusButton: { backgroundColor: colors.brand, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  postTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 6 },
+  postBodyText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], lineHeight: 22 },
   tagContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
-  tagPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 6, marginBottom: 4 },
-  tagText: { fontSize: 11, fontWeight: '700', color: '#64748B' },
-  mediaContainer: { width: '100%', height: 200, borderRadius: 12, marginTop: 12, overflow: 'hidden', backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  tagPill: { backgroundColor: colors.slate[100], paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 6, marginBottom: 4 },
+  tagText: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  mediaContainer: { width: '100%', height: 200, borderRadius: 12, marginTop: 12, overflow: 'hidden', backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   postMedia: { width: '100%', height: '100%', resizeMode: 'cover' },
-  postFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12, marginTop: 16 },
+  postFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.slate[100], paddingTop: 12, marginTop: 16 },
   actionButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginRight: 4 },
-  actionText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
+  actionText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
+  modalContent: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  topicPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
-  topicPillActive: { backgroundColor: '#3B82F6' },
-  topicText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  topicTextActive: { color: '#fff' },
-  inputLabel: { fontSize: 14, fontWeight: '700', color: '#334155', marginBottom: 8 },
-  titleInput: { fontSize: 16, color: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 8, marginBottom: 16 },
-  bodyInput: { fontSize: 15, color: '#334155', height: 80, textAlignVertical: 'top', marginBottom: 16 },
-  mediaSelectorBox: { height: 100, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
-  publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#F8FAFC', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
-  identityText: { fontSize: 14, fontWeight: '600', color: '#64748B', marginLeft: 8 },
-  identityTextActive: { color: '#34C759' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  topicPill: { backgroundColor: colors.slate[100], paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
+  topicPillActive: { backgroundColor: colors.accent },
+  topicText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  topicTextActive: { color: colors.white },
+  inputLabel: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.slate[700], marginBottom: 8 },
+  titleInput: { fontFamily: fontFamily.regular, fontSize: 16, color: colors.textPrimary, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8, marginBottom: 16 },
+  bodyInput: { fontFamily: fontFamily.regular, fontSize: 15, color: colors.slate[700], height: 80, textAlignVertical: 'top', marginBottom: 16 },
+  mediaSelectorBox: { height: 100, backgroundColor: colors.backgroundMuted, borderRadius: 16, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  publishButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  publishButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
+  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: colors.backgroundMuted, borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: colors.border },
+  identityPillActive: { backgroundColor: colors.brandSubtle, borderColor: colors.brand },
+  identityText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 8 },
+  identityTextActive: { color: colors.brand },
   postDateText: { 
   fontSize: 11, 
-  fontWeight: '600', 
-  color: '#94A3B8', 
+  fontFamily: fontFamily.semibold, 
+  color: colors.textTertiary, 
   marginLeft: 4 
 },
 followButton: {
     padding: 8,
     borderRadius: 20,
-    backgroundColor: '#F0FDF4',
+    backgroundColor: colors.brandSubtle,
     borderWidth: 1,
-    borderColor: '#DCFCE7',
+    borderColor: colors.brandSubtleStrong,
     marginLeft: 8
   },
-  followButtonActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
+  followButtonActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   nameRow: {
   flexDirection: 'row',
   alignItems: 'center',

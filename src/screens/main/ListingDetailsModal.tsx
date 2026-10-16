@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  View, Text, StyleSheet, Image, TouchableOpacity, Modal, ScrollView, 
+  View, Text, StyleSheet, Image, TouchableOpacity, Modal, ScrollView, FlatList,
   Dimensions, Alert, Platform 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import RatingModal from './RatingModal';
 
+import { colors, fontFamily } from '../../theme';
 const { width, height } = Dimensions.get('window');
 
 const LISTING_TYPE_LABELS: Record<string, string> = {
@@ -38,11 +39,13 @@ export default function ListingDetailsModal({
   const [isFollowingSeller, setIsFollowingSeller] = useState(false);
   const [isFollowingBusiness, setIsFollowingBusiness] = useState(false);
   const [ratingModalVisible, setRatingModalVisible] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
 
   useEffect(() => {
     if (visible && item) {
       setIsFollowingSeller(false);
       setIsFollowingBusiness(false);
+      setActiveImageIndex(0);
       checkFollowStatus(item);
     }
   }, [visible, item?.id]);
@@ -174,12 +177,17 @@ export default function ListingDetailsModal({
       businessId: isBusinessPost ? item.business.id : undefined,
       contextItem: item,
       itemId: item.id,
+      isNewInquiry: true,
     });
   };
 
   const formatCurrency = (amount: number) => `R ${Number(amount).toLocaleString('en-ZA')}`;
 
   if (!item) return null;
+
+  // Falls back to the legacy single image_url for listings created before
+  // multi-photo support existed, so nothing already in the database goes blank.
+  const galleryImages: string[] = item.image_urls?.length ? item.image_urls : (item.image_url ? [item.image_url] : []);
 
   const ratingTarget = item.business_id && item.business
     ? { id: item.business.creator_id, name: item.business.name }
@@ -197,7 +205,7 @@ export default function ListingDetailsModal({
 
             <View style={styles.detailsHeaderActions}>
               <TouchableOpacity style={styles.circularCloseButton} onPress={onClose}>
-                <Ionicons name="arrow-back" size={24} color="#1E293B" />
+                <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
               </TouchableOpacity>
 
               <Text style={styles.detailsHeaderTitle}>
@@ -209,7 +217,7 @@ export default function ListingDetailsModal({
                   style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
                   onPress={() => onManage(item)}
                 >
-                  <Ionicons name="ellipsis-horizontal" size={24} color="#1E293B" />
+                  <Ionicons name="ellipsis-horizontal" size={24} color={colors.textPrimary} />
                 </TouchableOpacity>
               ) : (
                 <View style={{ width: 40 }} />
@@ -219,11 +227,41 @@ export default function ListingDetailsModal({
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
               <View style={styles.fullSizeImageFrame}>
-                {item.image_url ? (
-                  <Image source={{ uri: item.image_url }} style={styles.fullProductImage} />
+                {galleryImages.length > 0 ? (
+                  <>
+                    <FlatList
+                      data={galleryImages}
+                      horizontal
+                      pagingEnabled
+                      showsHorizontalScrollIndicator={false}
+                      keyExtractor={(uri, index) => uri + index}
+                      onMomentumScrollEnd={(e) => {
+                        const index = Math.round(e.nativeEvent.contentOffset.x / width);
+                        setActiveImageIndex(index);
+                      }}
+                      renderItem={({ item: uri }) => (
+                        <Image source={{ uri }} style={[styles.fullProductImage, { width }]} />
+                      )}
+                    />
+                    {galleryImages.length > 1 && (
+                      <>
+                        <View style={styles.imageCounterBadge}>
+                          <Text style={styles.imageCounterText}>{activeImageIndex + 1} / {galleryImages.length}</Text>
+                        </View>
+                        <View style={styles.dotsRow}>
+                          {galleryImages.map((_, index) => (
+                            <View
+                              key={index}
+                              style={[styles.dot, index === activeImageIndex && styles.dotActive]}
+                            />
+                          ))}
+                        </View>
+                      </>
+                    )}
+                  </>
                 ) : (
                   <View style={styles.fullPlaceholderImage}>
-                    <Ionicons name="image-outline" size={80} color="#CBD5E1" />
+                    <Ionicons name="image-outline" size={80} color={colors.borderStrong} />
                   </View>
                 )}
               </View>
@@ -236,11 +274,11 @@ export default function ListingDetailsModal({
 
                 <View style={styles.detailsMetaRow}>
                   <View style={styles.metaBadgePill}>
-                    <Ionicons name="pricetag" size={12} color="#475569" style={{ marginRight: 4 }} />
+                    <Ionicons name="pricetag" size={12} color={colors.slate[600]} style={{ marginRight: 4 }} />
                     <Text style={styles.metaBadgeText}>{item.category}</Text>
                   </View>
                   <View style={styles.metaBadgePill}>
-                    <Ionicons name="location" size={12} color="#34C759" style={{ marginRight: 4 }} />
+                    <Ionicons name="location" size={12} color={colors.brand} style={{ marginRight: 4 }} />
                     <Text style={styles.metaBadgeText}>{item.location}</Text>
                   </View>
                 </View>
@@ -268,7 +306,7 @@ export default function ListingDetailsModal({
                         {item.business.logo_url ? (
                           <Image source={{ uri: item.business.logo_url }} style={styles.sellerAvatarImage} />
                         ) : (
-                          <Ionicons name="briefcase" size={24} color="#CBD5E1" />
+                          <Ionicons name="briefcase" size={24} color={colors.borderStrong} />
                         )}
                       </View>
 
@@ -281,7 +319,7 @@ export default function ListingDetailsModal({
                               style={styles.plusButton} 
                               onPress={() => handleFollowBusiness(item.business.id, item.business.name, item.business.creator_id)}
                             >
-                              <Ionicons name="add" size={14} color="#fff" />
+                              <Ionicons name="add" size={14} color={colors.white} />
                             </TouchableOpacity>
                           )}
                         </View>
@@ -313,7 +351,7 @@ export default function ListingDetailsModal({
                         {item.users?.avatar_url ? (
                           <Image source={{ uri: item.users.avatar_url }} style={styles.sellerAvatarImage} />
                         ) : (
-                          <Ionicons name="person-circle" size={44} color="#CBD5E1" />
+                          <Ionicons name="person-circle" size={44} color={colors.borderStrong} />
                         )}
                       </View>
 
@@ -326,7 +364,7 @@ export default function ListingDetailsModal({
                               style={styles.plusButton} 
                               onPress={() => handleFollowSeller(item.seller_id, item.users?.username || 'this seller')}
                             >
-                              <Ionicons name="add" size={14} color="#fff" />
+                              <Ionicons name="add" size={14} color={colors.white} />
                             </TouchableOpacity>
                           )}
                         </View>
@@ -360,7 +398,7 @@ export default function ListingDetailsModal({
 
                 {!isOwnPost && (
                   <TouchableOpacity style={styles.messageSellerActionButton} onPress={handleMessagePoster}>
-                    <Ionicons name="chatbubble-ellipses" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Ionicons name="chatbubble-ellipses" size={20} color={colors.white} style={{ marginRight: 8 }} />
                     <Text style={styles.messageSellerButtonText}>
                       {item.listing_type === 'job' ? 'Enquire About This Job' : 'Message Seller'}
                     </Text>
@@ -386,31 +424,36 @@ export default function ListingDetailsModal({
 }
 
 const styles = StyleSheet.create({
-  detailsModalOverlay: { flex: 1, backgroundColor: '#fff' },
+  detailsModalOverlay: { flex: 1, backgroundColor: colors.white },
   detailsModalContent: { flex: 1, paddingTop: Platform.OS === 'ios' ? 50 : 20 },
-  detailsHeaderActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, height: 50, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  circularCloseButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
-  detailsHeaderTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
-  fullSizeImageFrame: { width: width, height: height * 0.4, backgroundColor: '#F1F5F9' },
+  detailsHeaderActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, height: 50, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
+  circularCloseButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' },
+  detailsHeaderTitle: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  fullSizeImageFrame: { width: width, height: height * 0.4, backgroundColor: colors.slate[100], position: 'relative' },
+  imageCounterBadge: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  imageCounterText: { color: colors.white, fontSize: 12, fontFamily: fontFamily.bold },
+  dotsRow: { position: 'absolute', bottom: 14, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center' },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)', marginHorizontal: 3 },
+  dotActive: { backgroundColor: colors.white, width: 18 },
   fullProductImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   fullPlaceholderImage: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   detailsBodyTextWrapper: { padding: 24 },
-  detailsPriceText: { fontSize: 26, fontWeight: '900', color: '#1E293B' },
-  detailsTitleText: { fontSize: 20, fontWeight: '700', color: '#475569', marginTop: 4, lineHeight: 26 },
+  detailsPriceText: { fontSize: 26, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  detailsTitleText: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.slate[600], marginTop: 4, lineHeight: 26 },
   detailsMetaRow: { flexDirection: 'row', marginTop: 12 },
-  metaBadgePill: { flexDirection: 'row', backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginRight: 8, alignItems: 'center' },
-  metaBadgeText: { fontSize: 12, color: '#475569', fontWeight: '700' },
-  dividerLine: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 20 },
-  detailsSectionHeading: { fontSize: 12, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  detailsDescriptionBody: { fontSize: 15, color: '#334155', fontWeight: '500', lineHeight: 24 },
+  metaBadgePill: { flexDirection: 'row', backgroundColor: colors.slate[100], paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginRight: 8, alignItems: 'center' },
+  metaBadgeText: { fontSize: 12, color: colors.slate[600], fontFamily: fontFamily.bold },
+  dividerLine: { height: 1, backgroundColor: colors.border, marginVertical: 20 },
+  detailsSectionHeading: { fontSize: 12, fontFamily: fontFamily.extrabold, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  detailsDescriptionBody: { fontSize: 15, color: colors.slate[700], fontFamily: fontFamily.medium, lineHeight: 24 },
   sellerProfileLayoutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  sellerAvatarWrapper: { width: 46, height: 46, borderRadius: 16, backgroundColor: '#F1F5F9', overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  sellerAvatarWrapper: { width: 46, height: 46, borderRadius: 16, backgroundColor: colors.slate[100], overflow: 'hidden', borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   sellerAvatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  sellerNameLabel: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  sellerTierLabel: { fontSize: 12, fontWeight: '600', color: '#34C759', marginTop: 1 },
-  messageSellerActionButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 32, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 3 },
-  messageSellerButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  sellerTierLabelMuted: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  rateSellerLink: { fontSize: 12, fontWeight: '700', color: '#3B82F6', marginTop: 4 },
-  plusButton: { backgroundColor: '#34C759', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  sellerNameLabel: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  sellerTierLabel: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.brand, marginTop: 1 },
+  messageSellerActionButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 32, shadowColor: colors.brand, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 3 },
+  messageSellerButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
+  sellerTierLabelMuted: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textTertiary },
+  rateSellerLink: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.accent, marginTop: 4 },
+  plusButton: { backgroundColor: colors.brand, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
 });

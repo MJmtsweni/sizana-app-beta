@@ -1,32 +1,43 @@
-import React, { useState, useCallback } from 'react';
-import { 
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
-  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
-  ScrollView, Keyboard, TouchableWithoutFeedback, Linking
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Image,
+  TextInput, ActivityIndicator, Platform, Alert,
+  ScrollView, Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../../lib/supabase'; // Adjust path if necessary
 import { useUserLocation } from '../../hooks/useUserLocation';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
-import { getDistanceKm, formatDistance } from '../../lib/distance';
+import { formatDistance, NEARBY_RADIUS_KM } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
+import { pickImage as pickImageHelper, uploadImageToStorage } from '../../lib/imageUpload';
+import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
+import { CategoryPicker, EmptyState, ModalSheet } from '../../components/ui';
+import EditBusinessModalScreen from './EditBusinessModalScreen';
 
+import { colors, fontFamily } from '../../theme';
 export default function BusinessScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
   const [openTime, setOpenTime] = useState(new Date(new Date().setHours(8, 0, 0, 0))); // Defaults to 08:00
   const [closeTime, setCloseTime] = useState(new Date(new Date().setHours(17, 0, 0, 0))); // Defaults to 17:00
 
+  // One paginated dataset serves all three scopes — which query builds each
+  // page (see fetchBusinessesPage) is the only thing that changes.
   const [businesses, setBusinesses] = useState<any[]>([]);
-  const [filteredBusinesses, setFilteredBusinesses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const isFirstFilterRun = useRef(true);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [scope, setScope] = useState<Scope>('explore');
@@ -35,8 +46,8 @@ export default function BusinessScreen({ navigation, route }: any) {
   const { capturing: capturingLocation, captureLocation } = useLocationCapture();
   
   // Excluded 'All' from the registration form choices to prevent users from creating an 'All' business
-  const filterCategories = ['All', 'Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
-  const formCategories = ['Agriculture', 'Technology', 'Retail', 'Services', 'Food & Dining'];
+  const filterCategories = ['All', ...BUSINESS_CATEGORIES];
+  const formCategories = BUSINESS_CATEGORIES;
 
   const [modalVisible, setModalVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -69,68 +80,131 @@ export default function BusinessScreen({ navigation, route }: any) {
   const [galleryLabel, setGalleryLabel] = useState('');
   const [uploadingGallery, setUploadingGallery] = useState(false);
 
+  // Business being edited via the card's "Manage Business" menu
+  const [editingBusiness, setEditingBusiness] = useState<any>(null);
+
   useFocusEffect(
-    useCallback(() => { fetchBusinesses(); }, [])
+    useCallback(() => { fetchBusinesses(); }, [scope])
   );
 
-  React.useEffect(() => { applyFilters(); }, [searchQuery, activeCategory, businesses, scope, myLocation, deviceCoords]);
+  // Location/GPS resolving asynchronously after mount (permission prompt,
+  // profile fetch) needs its own trigger — Home/Nearby depend on it but it
+  // isn't known yet when the focus effect above first runs.
+  useEffect(() => {
+    if (scope === 'explore') return;
+    fetchBusinesses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation, deviceCoords, scope]);
+
+  // Search/category filters are applied server-side for every scope now, so
+  // a change re-fetches page 0 rather than re-filtering an in-memory array.
+  // Debounced so search-as-you-type doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
+      return;
+    }
+    const handle = setTimeout(() => { fetchBusinesses(); }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, activeCategory]);
+
+  // Shared category/search filters, reused by both the plain Explore query
+  // and Home's location-matched one — Nearby uses the nearby_businesses RPC
+  // instead (see fetchBusinessesPage) since it needs real distance ranking.
+  function buildBusinessesQuery(locationFilter?: string) {
+    let query = supabase.from('businesses').select('*, gallery:business_gallery(*)');
+    if (activeCategory !== 'All') query = query.eq('category', activeCategory);
+    if (searchQuery.trim()) query = query.ilike('name', `%${searchQuery.trim()}%`);
+    if (locationFilter) query = query.ilike('location', `%${locationFilter}%`);
+    return query.order('created_at', { ascending: false });
+  }
+
+  // Hydrates the (distance-ranked) ids the RPC returned into full business
+  // rows, preserving rank order and attaching _distanceKm for display.
+  async function hydrateNearbyIds(ranked: { id: string; distance_km: number }[]) {
+    if (ranked.length === 0) return [];
+    const ids = ranked.map(r => r.id);
+    const distanceById = new Map(ranked.map(r => [r.id, r.distance_km]));
+    const { data, error } = await supabase.from('businesses').select('*, gallery:business_gallery(*)').in('id', ids);
+    if (error) throw error;
+    return ids
+      .map(id => {
+        const biz = data?.find((b: any) => b.id === id);
+        return biz ? { ...biz, _distanceKm: distanceById.get(id) } : null;
+      })
+      .filter(Boolean);
+  }
+
+  async function fetchBusinessesPage(pageNum: number): Promise<any[]> {
+    const [from, to] = pageRange(pageNum);
+
+    if (scope === 'home') {
+      if (!myLocation) return [];
+      const { data, error } = await withRetry(() => buildBusinessesQuery(myLocation).range(from, to));
+      if (error) throw error;
+      return data || [];
+    }
+
+    if (scope === 'nearby') {
+      if (deviceCoords) {
+        const { data, error } = await withRetry(() => supabase.rpc('nearby_businesses', {
+          p_lat: deviceCoords.latitude,
+          p_lng: deviceCoords.longitude,
+          p_radius_km: NEARBY_RADIUS_KM,
+          p_category: activeCategory !== 'All' ? activeCategory : null,
+          p_search: searchQuery.trim() || null,
+          p_limit: PAGE_SIZE,
+          p_offset: from,
+        }));
+        if (error) throw error;
+        return hydrateNearbyIds(data || []);
+      }
+      // GPS denied/unavailable — fall back to the Home-style text match.
+      if (myLocation) {
+        const { data, error } = await withRetry(() => buildBusinessesQuery(myLocation).range(from, to));
+        if (error) throw error;
+        return data || [];
+      }
+      return [];
+    }
+
+    // explore
+    const { data, error } = await withRetry(() => buildBusinessesQuery().range(from, to));
+    if (error) throw error;
+    return data || [];
+  }
 
   async function fetchBusinesses() {
     try {
-      if (!refreshing) setLoading(true);
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('*, gallery:business_gallery(*)')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      if (data) {
-        setBusinesses(data);
-        setFilteredBusinesses(data);
-      }
+      if (businesses.length === 0) setLoading(true);
+      const data = await fetchBusinessesPage(0);
+      setBusinesses(data);
+      setPage(0);
+      setHasMore(data.length === PAGE_SIZE);
     } catch (e: any) {
-      console.error("Directory fetch error:", e.message);
+      console.error('Businesses fetch error:', e.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }
 
-  const applyFilters = () => {
-    let result = [...businesses];
-
-    if (scope === 'home') {
-      if (!myLocation) {
-        setFilteredBusinesses([]);
-        return;
-      }
-      result = result.filter(b => b.location?.toLowerCase().includes(myLocation.toLowerCase()));
-    } else if (scope === 'nearby') {
-      if (deviceCoords) {
-        // Real distance ranking — only listings with saved coordinates can participate.
-        result = result
-          .filter(b => b.latitude != null && b.longitude != null)
-          .map(b => ({
-            ...b,
-            _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, b.latitude, b.longitude),
-          }))
-          .sort((a, b) => a._distanceKm - b._distanceKm);
-      } else if (myLocation) {
-        // GPS denied/unavailable — fall back to the Home-style text match.
-        result = result.filter(b => b.location?.toLowerCase().includes(myLocation.toLowerCase()));
-      } else {
-        setFilteredBusinesses([]);
-        return;
-      }
+  async function loadMoreBusinesses() {
+    if (loadingMore || !hasMore || loading) return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const data = await fetchBusinessesPage(nextPage);
+      setBusinesses(prev => [...prev, ...data]);
+      setPage(nextPage);
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (e: any) {
+      console.error('Businesses load-more error:', e.message);
+    } finally {
+      setLoadingMore(false);
     }
-
-    if (activeCategory !== 'All') result = result.filter(b => b.category === activeCategory);
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(b => b.name.toLowerCase().includes(q) || b.location.toLowerCase().includes(q));
-    }
-    setFilteredBusinesses(result);
-  };
+  }
 
   const handleOpenLink = async (url: string) => {
     if (!url) return;
@@ -145,14 +219,14 @@ export default function BusinessScreen({ navigation, route }: any) {
     handleOpenLink(`whatsapp://send?phone=${cleanPhone}`);
   };
 
-  async function pickImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.6 });
-    if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, logoUri: result.assets[0].uri });
+  async function pickLogoImage() {
+    const uri = await pickImageHelper({ aspect: [1, 1], quality: 0.6 });
+    if (uri) setNewBiz({ ...newBiz, logoUri: uri });
   }
 
   async function pickCoverPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [16, 9], quality: 0.8 });
-    if (!result.canceled && result.assets[0].uri) setNewBiz({ ...newBiz, coverPhotoUri: result.assets[0].uri });
+    const uri = await pickImageHelper({ aspect: [16, 9], quality: 0.8 });
+    if (uri) setNewBiz({ ...newBiz, coverPhotoUri: uri });
   }
 
   // --- REGISTRATION VALIDATION ---
@@ -193,26 +267,12 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       // 1. Upload Logo if exists
       if (newBiz.logoUri) {
-        const fileExt = newBiz.logoUri.split('.').pop()?.toLowerCase() || 'jpg';
-        const fileName = `biz-${Date.now()}.${fileExt}`;
-        const formData = new FormData();
-        formData.append('file', { uri: newBiz.logoUri, name: fileName, type: `image/${fileExt}` } as any);
-        const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
-        if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
-        finalLogoUrl = data.publicUrl;
+        finalLogoUrl = await uploadImageToStorage(newBiz.logoUri, { fileNamePrefix: 'biz', maxDimension: 800 });
       }
 
       // 2. Upload Cover Photo if exists
       if (newBiz.coverPhotoUri) {
-        const fileExt = newBiz.coverPhotoUri.split('.').pop()?.toLowerCase() || 'jpg';
-        const fileName = `cover-${Date.now()}.${fileExt}`;
-        const formData = new FormData();
-        formData.append('file', { uri: newBiz.coverPhotoUri, name: fileName, type: `image/${fileExt}` } as any);
-        const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
-        if (uploadError) throw uploadError;
-        const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
-        finalCoverUrl = data.publicUrl;
+        finalCoverUrl = await uploadImageToStorage(newBiz.coverPhotoUri, { fileNamePrefix: 'cover', maxDimension: 1600 });
       }
 
       // 3. Insert Database Record
@@ -241,7 +301,7 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       setModalVisible(false);
       fetchBusinesses();
-      
+
       // Full Form Reset
       setNewBiz({ name: '', category: 'Services', description: '', location: '', contact_email: '', contact_phone: '', whatsapp_number: '', website_url: '', logoUri: null, coverPhotoUri: null, latitude: null, longitude: null });
       setOpenTime(new Date(new Date().setHours(8, 0, 0, 0)));
@@ -258,24 +318,16 @@ export default function BusinessScreen({ navigation, route }: any) {
     if (!galleryImageUri || !activeBusinessId) return;
     try {
       setUploadingGallery(true);
-      const fileExt = galleryImageUri.split('.').pop()?.toLowerCase() || 'jpg';
-      const fileName = `gallery-${Date.now()}.${fileExt}`;
-      const formData = new FormData();
-      formData.append('file', { uri: galleryImageUri, name: fileName, type: `image/${fileExt}` } as any);
-      
-      const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
-      if (uploadError) throw uploadError;
-      
-      const { data } = supabase.storage.from('Listings').getPublicUrl(fileName);
-      
+      const publicUrl = await uploadImageToStorage(galleryImageUri, { fileNamePrefix: 'gallery', maxDimension: 1600 });
+
       await supabase.from('business_gallery').insert({
-        business_id: activeBusinessId, media_url: data.publicUrl, label: galleryLabel
+        business_id: activeBusinessId, media_url: publicUrl, label: galleryLabel
       });
 
       setGalleryModalVisible(false);
       setGalleryImageUri(null);
       setGalleryLabel('');
-      fetchBusinesses(); 
+      fetchBusinesses();
     } catch (e: any) {
       Alert.alert('Upload Failed', e.message);
     } finally {
@@ -310,14 +362,14 @@ export default function BusinessScreen({ navigation, route }: any) {
           <Image source={{ uri: item.logo_url }} style={styles.bizLogo} />
         ) : (
           <View style={[styles.bizLogo, styles.logoPlaceholder]}>
-            <Ionicons name="briefcase" size={24} color="#94A3B8" />
+            <Ionicons name="briefcase" size={24} color={colors.textTertiary} />
           </View>
         )}
         <View style={styles.headerTextContainer}>
           <Text style={styles.categoryBadge}>{item.category}</Text>
           <Text style={styles.bizName}>{item.name}</Text>
           <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={14} color="#64748B" />
+            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
             <Text style={styles.locationText}>{item.location}</Text>
             {item._distanceKm != null && (
               <Text style={styles.distanceBadge}>· {formatDistance(item._distanceKm)}</Text>
@@ -331,11 +383,12 @@ export default function BusinessScreen({ navigation, route }: any) {
             onPress={() => {
               Alert.alert("Manage Business", "What would you like to do?", [
                 { text: "Cancel", style: "cancel" },
+                { text: "Edit", onPress: () => setEditingBusiness(item) },
                 { text: "Delete Listing", style: "destructive", onPress: () => handleDeleteBusiness(item.id) }
               ]);
             }}
           >
-            <Ionicons name="ellipsis-vertical" size={20} color="#64748B" />
+            <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         )}
       </View>
@@ -344,7 +397,7 @@ export default function BusinessScreen({ navigation, route }: any) {
         <Text style={styles.descriptionText} numberOfLines={3}>{item.description}</Text>
         {item.operating_hours && (
           <View style={styles.detailRow}>
-            <Ionicons name="time-outline" size={16} color="#34C759" />
+            <Ionicons name="time-outline" size={16} color={colors.brand} />
             <Text style={styles.detailText}><Text style={styles.boldText}>Hours:</Text> {item.operating_hours}</Text>
           </View>
         )}
@@ -352,13 +405,13 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       {item.gallery && item.gallery.length > 0 && (
         <View style={{ paddingBottom: 16 }}>
-          <Text style={{ paddingHorizontal: 16, fontSize: 13, fontWeight: '800', color: '#64748B', marginBottom: 8, textTransform: 'uppercase' }}>Products & Portfolio</Text>
+          <Text style={{ paddingHorizontal: 16, fontSize: 13, fontFamily: fontFamily.extrabold, color: colors.textSecondary, marginBottom: 8, textTransform: 'uppercase' }}>Products & Portfolio</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16 }}>
             {item.gallery.map((media: any) => (
               <View key={media.id} style={{ marginRight: 12, width: 120 }}>
-                <Image source={{ uri: media.media_url }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: '#F1F5F9' }} />
+                <Image source={{ uri: media.media_url }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: colors.slate[100] }} />
                 {media.label && (
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#1E293B', marginTop: 6 }} numberOfLines={1}>{media.label}</Text>
+                  <Text style={{ fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textPrimary, marginTop: 6 }} numberOfLines={1}>{media.label}</Text>
                 )}
               </View>
             ))}
@@ -368,11 +421,11 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       {session?.user?.id === item.creator_id && (
         <TouchableOpacity 
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0FDF4', marginHorizontal: 16, paddingVertical: 10, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: '#DCFCE7' }}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.brandSubtle, marginHorizontal: 16, paddingVertical: 10, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: colors.brandSubtleStrong }}
           onPress={() => { setActiveBusinessId(item.id); setGalleryModalVisible(true); }}
         >
-          <Ionicons name="camera" size={16} color="#34C759" />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#34C759', marginLeft: 6 }}>Add to Portfolio</Text>
+          <Ionicons name="camera" size={16} color={colors.brand} />
+          <Text style={{ fontSize: 13, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 6 }}>Add to Portfolio</Text>
         </TouchableOpacity>
       )}
 
@@ -380,22 +433,22 @@ export default function BusinessScreen({ navigation, route }: any) {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {item.contact_phone && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(`tel:${item.contact_phone}`)}>
-              <Ionicons name="call" size={18} color="#475569" />
+              <Ionicons name="call" size={18} color={colors.slate[600]} />
             </TouchableOpacity>
           )}
           {item.whatsapp_number && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleWhatsApp(item.whatsapp_number)}>
-              <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              <Ionicons name="logo-whatsapp" size={18} color={colors.whatsapp} />
             </TouchableOpacity>
           )}
           {item.contact_email && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(`mailto:${item.contact_email}`)}>
-              <Ionicons name="mail" size={18} color="#475569" />
+              <Ionicons name="mail" size={18} color={colors.slate[600]} />
             </TouchableOpacity>
           )}
           {item.website_url && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(item.website_url.startsWith('http') ? item.website_url : `https://${item.website_url}`)}>
-              <Ionicons name="globe-outline" size={18} color="#475569" />
+              <Ionicons name="globe-outline" size={18} color={colors.slate[600]} />
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -415,7 +468,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               session: session,
             })}
           >
-            <Ionicons name="chatbubbles" size={20} color="#fff" />
+            <Ionicons name="chatbubbles" size={20} color={colors.white} />
             <Text style={styles.messageButtonText}>Chat with Business</Text>
           </TouchableOpacity>
         </View>
@@ -429,7 +482,7 @@ export default function BusinessScreen({ navigation, route }: any) {
         <View style={styles.headerTitleRow}>
           <Text style={styles.navTitle}>Local Directory</Text>
           <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.navIconButton}>
-            <Ionicons name="add-circle" size={28} color="#34C759" />
+            <Ionicons name="add-circle" size={28} color={colors.brand} />
           </TouchableOpacity>
         </View>
         <ScopeToggle
@@ -444,70 +497,51 @@ export default function BusinessScreen({ navigation, route }: any) {
           }
         />
         <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#94A3B8" style={styles.searchIcon} />
+          <Ionicons name="search" size={20} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput style={styles.searchInput} placeholder="Search businesses..." value={searchQuery} onChangeText={setSearchQuery} />
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-          {filterCategories.map(cat => (
-            <TouchableOpacity key={cat} style={[styles.categoryPill, activeCategory === cat && styles.categoryPillActive]} onPress={() => setActiveCategory(cat)}>
-              <Text style={[styles.categoryPillText, activeCategory === cat && styles.categoryPillTextActive]}>{cat}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <CategoryPicker categories={filterCategories} selected={activeCategory} onSelect={setActiveCategory} />
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
-          data={filteredBusinesses}
+          data={businesses}
           keyExtractor={(item) => item.id}
           renderItem={renderBusinessCard}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           onRefresh={() => { setRefreshing(true); fetchBusinesses(); }}
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreBusinesses}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
-              <View style={styles.emptyLayout}>
-                <Ionicons name="location-outline" size={60} color="#CBD5E1" />
-                <Text style={styles.emptyText}>Set your location on your profile to see businesses at home.</Text>
-                <TouchableOpacity style={styles.setLocationButton} onPress={() => navigation.navigate('Profile', { session })}>
-                  <Text style={styles.setLocationButtonText}>Go to Profile</Text>
-                </TouchableOpacity>
-              </View>
+              <EmptyState
+                icon="location-outline"
+                title="Set your location on your profile to see businesses at home."
+                actionLabel="Go to Profile"
+                onAction={() => navigation.navigate('Profile', { session })}
+              />
             ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
-              <View style={styles.emptyLayout}>
-                <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
-                <Text style={styles.emptyText}>Enable location access, or set your profile location, to see nearby businesses.</Text>
-              </View>
+              <EmptyState
+                icon="navigate-outline"
+                title="Enable location access, or set your profile location, to see nearby businesses."
+              />
             ) : (
-              <View style={styles.emptyLayout}>
-                <Ionicons name="briefcase-outline" size={60} color="#CBD5E1" />
-                <Text style={styles.emptyText}>
-                  {scope === 'home' ? `No businesses found at home in ${myLocation}.` : scope === 'nearby' ? 'No businesses found nearby.' : 'No businesses found.'}
-                </Text>
-              </View>
+              <EmptyState
+                icon="briefcase-outline"
+                title={scope === 'home' ? `No businesses found at home in ${myLocation}.` : scope === 'nearby' ? 'No businesses found nearby.' : 'No businesses found.'}
+              />
             )
           }
         />
       )}
 
       {/* REGISTRATION MODAL */}
-      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-            style={styles.modalContent} 
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Register Business</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}> 
-              
+      <ModalSheet visible={modalVisible} onClose={() => setModalVisible(false)} title="Register Business">
               {/* COVER PHOTO UPLOAD */}
               <TouchableOpacity 
                 style={[styles.imageSelector, { width: '100%', height: 120, marginBottom: 16, borderRadius: 12 }]} 
@@ -517,15 +551,15 @@ export default function BusinessScreen({ navigation, route }: any) {
                   <Image source={{ uri: newBiz.coverPhotoUri }} style={{ width: '100%', height: '100%', borderRadius: 12 }} />
                 ) : (
                   <>
-                    <Ionicons name="image-outline" size={32} color="#94A3B8" />
+                    <Ionicons name="image-outline" size={32} color={colors.textTertiary} />
                     <Text style={styles.imagePlaceholderText}>Upload Cover Photo</Text>
                   </>
                 )}
               </TouchableOpacity>
 
               <View style={styles.imagePickerRow}>
-                <TouchableOpacity style={styles.imageSelector} onPress={pickImage}>
-                  {newBiz.logoUri ? <Image source={{ uri: newBiz.logoUri }} style={styles.selectedLogo} /> : <><Ionicons name="image-outline" size={28} color="#94A3B8" /><Text style={styles.imagePlaceholderText}>Upload Logo</Text></>}
+                <TouchableOpacity style={styles.imageSelector} onPress={pickLogoImage}>
+                  {newBiz.logoUri ? <Image source={{ uri: newBiz.logoUri }} style={styles.selectedLogo} /> : <><Ionicons name="image-outline" size={28} color={colors.textTertiary} /><Text style={styles.imagePlaceholderText}>Upload Logo</Text></>}
                 </TouchableOpacity>
                 <View style={{ flex: 1, paddingLeft: 16 }}>
                   <Text style={styles.inputLabel}>Business Name</Text>
@@ -535,17 +569,12 @@ export default function BusinessScreen({ navigation, route }: any) {
 
               {/* INTERACTIVE CATEGORY SELECTOR UX */}
               <Text style={styles.inputLabel}>Category</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-                {formCategories.map(cat => (
-                  <TouchableOpacity 
-                    key={cat} 
-                    style={[styles.categoryPill, newBiz.category === cat && styles.categoryPillActive, { marginRight: 8, marginBottom: 0 }]} 
-                    onPress={() => setNewBiz({...newBiz, category: cat})}
-                  >
-                    <Text style={[styles.categoryPillText, newBiz.category === cat && styles.categoryPillTextActive]}>{cat}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <CategoryPicker
+                categories={formCategories}
+                selected={newBiz.category}
+                onSelect={(cat) => setNewBiz({...newBiz, category: cat})}
+                style={{ paddingHorizontal: 0, marginBottom: 16 }}
+              />
 
               <Text style={styles.inputLabel}>Website (Optional)</Text>
               <TextInput style={styles.inputField} placeholder="www.example.com" keyboardType="url" autoCapitalize="none" value={newBiz.website_url} onChangeText={t => setNewBiz({...newBiz, website_url: t})} />
@@ -568,7 +597,7 @@ export default function BusinessScreen({ navigation, route }: any) {
                           }
                         }}
                       >
-                        {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={20} color="#34C759" />}
+                        {capturingLocation ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={20} color={colors.brand} />}
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -578,14 +607,14 @@ export default function BusinessScreen({ navigation, route }: any) {
                 <Text style={styles.inputLabel}>Operating Hours</Text>
                 <View style={styles.halfInputRow}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Opening Time</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Opening Time</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                          <DateTimePicker value={openTime} mode="time" display="default" onChange={(e, d) => d && setOpenTime(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowOpenPicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatTime(openTime)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatTime(openTime)}</Text>
                       </TouchableOpacity>
                     )}
                     {showOpenPicker && Platform.OS === 'android' && (
@@ -594,14 +623,14 @@ export default function BusinessScreen({ navigation, route }: any) {
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Closing Time</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Closing Time</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                         <DateTimePicker value={closeTime} mode="time" display="default" onChange={(e, d) => d && setCloseTime(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowClosePicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatTime(closeTime)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatTime(closeTime)}</Text>
                       </TouchableOpacity>
                     )}
                     {showClosePicker && Platform.OS === 'android' && (
@@ -617,33 +646,21 @@ export default function BusinessScreen({ navigation, route }: any) {
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput style={styles.inputField} keyboardType="email-address" value={newBiz.contact_email} onChangeText={t => setNewBiz({...newBiz, contact_email: t})} />
               <TouchableOpacity style={styles.publishButton} onPress={handleRegisterBusiness} disabled={uploading}>
-                {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Register Business</Text>}
+                {uploading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishButtonText}>Register Business</Text>}
               </TouchableOpacity>
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      </ModalSheet>
 
       {/* GALLERY UPLOAD MODAL (UX Wrapper applied) */}
-      <Modal animationType="fade" transparent={true} visible={galleryModalVisible} onRequestClose={() => setGalleryModalVisible(false)}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} 
-              style={styles.modalContent} 
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
-            >
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Add to Portfolio</Text>
-                <TouchableOpacity onPress={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
-              </View>
-              <TouchableOpacity 
-                style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]} 
+      <ModalSheet
+        visible={galleryModalVisible}
+        onClose={() => { setGalleryModalVisible(false); setGalleryImageUri(null); }}
+        title="Add to Portfolio"
+      >
+              <TouchableOpacity
+                style={[styles.imageSelector, { height: 200, width: '100%', marginBottom: 16 }]}
                 onPress={async () => {
-                  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
-                  if (!result.canceled) setGalleryImageUri(result.assets[0].uri);
+                  const localUri = await pickImageHelper({ allowsEditing: false, quality: 0.7 });
+                  if (localUri) setGalleryImageUri(localUri);
                 }}
               >
                 {galleryImageUri ? <Image source={{ uri: galleryImageUri }} style={styles.selectedLogo} /> : <Text style={styles.imagePlaceholderText}>Tap to select image</Text>}
@@ -651,71 +668,64 @@ export default function BusinessScreen({ navigation, route }: any) {
               <Text style={styles.inputLabel}>Product Label (Optional)</Text>
               <TextInput style={styles.inputField} placeholder="e.g. Summer Shoes" value={galleryLabel} onChangeText={setGalleryLabel} />
               <TouchableOpacity style={styles.publishButton} onPress={handleAddGalleryItem} disabled={uploadingGallery || !galleryImageUri}>
-                {uploadingGallery ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
+                {uploadingGallery ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
               </TouchableOpacity>
-            </KeyboardAvoidingView>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      </ModalSheet>
+
+      {editingBusiness && (
+        <EditBusinessModalScreen
+          visible={!!editingBusiness}
+          business={editingBusiness}
+          onClose={() => setEditingBusiness(null)}
+          onUpdate={fetchBusinesses}
+        />
+      )}
     </View>
   );
 }
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  topPanel: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 10 },
+  topPanel: { backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 10 },
   headerTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 16 },
-  navTitle: { fontSize: 24, fontWeight: '800', color: '#1E293B' },
+  navTitle: { fontSize: 24, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   navIconButton: { padding: 4 },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', marginHorizontal: 20, borderRadius: 12, paddingHorizontal: 16, height: 44, marginBottom: 16 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], marginHorizontal: 20, borderRadius: 12, paddingHorizontal: 16, height: 44, marginBottom: 16 },
   searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: '#1E293B', fontWeight: '500' },
-  categoryScroll: { paddingHorizontal: 20, paddingBottom: 6 },
-  categoryPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F1F5F9', marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  categoryPillActive: { backgroundColor: '#1E293B', borderColor: '#1E293B' },
-  categoryPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  categoryPillTextActive: { color: '#fff' },
+  searchInput: { flex: 1, fontSize: 15, color: colors.textPrimary, fontFamily: fontFamily.medium },
   
-  bizCard: { backgroundColor: '#fff', borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  bizCard: { backgroundColor: colors.white, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   cardCoverImage: { width: '100%', height: 120, resizeMode: 'cover' },
-  cardHeader: { flexDirection: 'row', padding: 16, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  cardHeader: { flexDirection: 'row', padding: 16, backgroundColor: colors.backgroundMuted, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
   cardHeaderWithCover: { paddingTop: 8 },
-  bizLogo: { width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: '#fff', marginTop: -30 }, // Overlaps the cover if cover exists
-  logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#F1F5F9', marginTop: 0 },
+  bizLogo: { width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: colors.white, backgroundColor: colors.white, marginTop: -30 }, // Overlaps the cover if cover exists
+  logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate[100], marginTop: 0 },
   headerTextContainer: { flex: 1, marginLeft: 16, justifyContent: 'center' },
-  categoryBadge: { fontSize: 10, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
-  bizName: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
+  categoryBadge: { fontSize: 10, fontFamily: fontFamily.extrabold, color: colors.accent, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  bizName: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 6 },
   locationRow: { flexDirection: 'row', alignItems: 'center' },
-  locationText: { fontSize: 12, fontWeight: '600', color: '#64748B', marginLeft: 4 },
+  locationText: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 4 },
   
   cardBody: { padding: 16 },
-  descriptionText: { fontSize: 14, color: '#475569', lineHeight: 22, marginBottom: 12 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: '#F0FDF4', padding: 8, borderRadius: 8, alignSelf: 'flex-start' },
-  detailText: { fontSize: 12, color: '#1E293B', marginLeft: 6 },
-  boldText: { fontWeight: '700' },
+  descriptionText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], lineHeight: 22, marginBottom: 12 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: colors.brandSubtle, padding: 8, borderRadius: 8, alignSelf: 'flex-start' },
+  detailText: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textPrimary, marginLeft: 6 },
+  boldText: { fontFamily: fontFamily.bold },
   contactActionBar: { paddingHorizontal: 16, paddingBottom: 16 },
-  iconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0' },
+  iconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: colors.border },
   cardFooter: { padding: 16, paddingTop: 0 },
-  messageButton: { flexDirection: 'row', backgroundColor: '#34C759', paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  messageButtonText: { fontSize: 15, fontWeight: '700', color: '#fff', marginLeft: 8 },
-  emptyLayout: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
-  setLocationButton: { backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
-  setLocationButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '95%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  sectionHeader: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginTop: 8, marginBottom: 12 },
+  messageButton: { flexDirection: 'row', backgroundColor: colors.brand, paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  messageButtonText: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.white, marginLeft: 8 },
+  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.brandSubtle, borderWidth: 1, borderColor: colors.brandSubtleStrong, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  distanceBadge: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 4 },
+  sectionHeader: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginTop: 8, marginBottom: 12 },
   imagePickerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  imageSelector: { width: 80, height: 80, borderRadius: 16, backgroundColor: '#F8FAFC', borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  imageSelector: { width: 80, height: 80, borderRadius: 16, backgroundColor: colors.backgroundMuted, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   selectedLogo: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imagePlaceholderText: { fontSize: 12, fontWeight: '700', color: '#94A3B8', marginTop: 4 },
+  imagePlaceholderText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textTertiary, marginTop: 4 },
   halfInputRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  inputLabel: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 },
-  inputField: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, color: '#1E293B', marginBottom: 16 },
-  publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
-  publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' }
+  inputLabel: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 },
+  inputField: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontFamily: fontFamily.regular, fontSize: 14, color: colors.textPrimary, marginBottom: 16 },
+  publishButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
+  publishButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold }
 });

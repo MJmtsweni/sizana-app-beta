@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { 
   StyleSheet, Text, View, FlatList, Image, 
   TouchableOpacity, TextInput, ActivityIndicator, 
@@ -9,7 +9,12 @@ import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ListingDetailsModal from './ListingDetailsModal';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
+import { CategoryPicker, EmptyState } from '../../components/ui';
 
+import { colors, fontFamily } from '../../theme';
 const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 40) / 2;
 
@@ -50,11 +55,16 @@ const PRICE_LABEL: Record<string, string> = {
 export default function MarketScreen({ route, session: directSession, navigation }: any) {
   const session = route?.params?.session || directSession;
 
-  const [listings, setListings] = useState<any[]>([]);
   const [filteredListings, setFilteredListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Skips the redundant fetch the search/filter debounce effect would
+  // otherwise fire on mount, right on top of useFocusEffect's own fetch.
+  const isFirstFilterRun = useRef(true);
 
   // Type + category filter state
   const [listingType, setListingType] = useState('product');
@@ -71,7 +81,8 @@ export default function MarketScreen({ route, session: directSession, navigation
   const [newCategory, setNewCategory] = useState(CATEGORY_MAP.product[1]);
   const [newLocation, setNewLocation] = useState('Schweizer-Reneke');
   const [newDescription, setNewDescription] = useState('');
-  const [newImageUrl, setNewImageUrl] = useState('');
+  const [newImageUrls, setNewImageUrls] = useState<string[]>([]);
+  const MAX_PHOTOS = 6;
   const [creatingListingType, setCreatingListingType] = useState('product');
 
   // Edit mode — holds the ID of the listing being edited, null when creating
@@ -95,22 +106,38 @@ export default function MarketScreen({ route, session: directSession, navigation
     }, [session?.user?.id])
   );
 
+  // Search/category/location/type filters are all applied server-side now
+  // (not client-side over a fully-fetched table), so pagination and
+  // filtering compose correctly instead of a page boundary silently
+  // hiding matches that were never fetched.
+  function buildListingsQuery() {
+    let query = supabase
+      .from('market_items')
+      .select(`
+        id, title, description, price, category, image_url, image_urls, location, created_at, seller_id, listing_type, business_id,
+        users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
+        business:business_id ( id, name, logo_url, creator_id )
+      `)
+      .eq('listing_type', listingType);
+
+    if (selectedCategory !== 'All') query = query.eq('category', selectedCategory);
+    if (searchQuery.trim()) query = query.ilike('title', `%${searchQuery.trim()}%`);
+    if (locationQuery.trim()) query = query.ilike('location', `%${locationQuery.trim()}%`);
+
+    return query.order('created_at', { ascending: false });
+  }
+
   async function fetchListings() {
     try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('market_items')
-        .select(`
-          id, title, description, price, category, image_url, location, created_at, seller_id, listing_type, business_id,
-          users!market_items_seller_id_fkey ( username, avatar_url, rating, is_verified ),
-          business:business_id ( id, name, logo_url, creator_id )
-        `)
-        .order('created_at', { ascending: false });
+      if (filteredListings.length === 0) setLoading(true);
+      const [from, to] = pageRange(0);
+      const { data, error } = await withRetry(() => buildListingsQuery().range(from, to));
 
       if (error) throw error;
       if (data) {
-        setListings(data);
-        applyFilters(data, searchQuery, locationQuery, selectedCategory, listingType);
+        setFilteredListings(data);
+        setPage(0);
+        setHasMore(data.length === PAGE_SIZE);
       }
     } catch (error: any) {
       Alert.alert('Marketplace Load Error', error.message);
@@ -119,6 +146,39 @@ export default function MarketScreen({ route, session: directSession, navigation
       setRefreshing(false);
     }
   }
+
+  async function loadMoreListings() {
+    if (loadingMore || !hasMore || loading) return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const [from, to] = pageRange(nextPage);
+      const { data, error } = await withRetry(() => buildListingsQuery().range(from, to));
+
+      if (error) throw error;
+      if (data) {
+        setFilteredListings(prev => [...prev, ...data]);
+        setPage(nextPage);
+        setHasMore(data.length === PAGE_SIZE);
+      }
+    } catch (error: any) {
+      console.error('Marketplace load-more error:', error.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // Re-fetches page 0 whenever a filter changes, debounced so search-as-you-type
+  // doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
+      return;
+    }
+    const handle = setTimeout(() => { fetchListings(); }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, locationQuery, selectedCategory, listingType]);
 
   async function fetchUserBusinesses() {
     if (!session?.user?.id) return;
@@ -134,28 +194,17 @@ export default function MarketScreen({ route, session: directSession, navigation
     }
   }
 
-  const applyFilters = (allData: any[], search: string, location: string, cat: string, type: string) => {
-    let temp = allData.filter(item => item.listing_type === type);
-    if (cat !== 'All') temp = temp.filter(item => item.category === cat);
-    if (search.trim() !== '') {
-      temp = temp.filter(item => 
-        item.title.toLowerCase().includes(search.toLowerCase()) || 
-        item.description?.toLowerCase().includes(search.toLowerCase())
-      );
-    }
-    if (location.trim() !== '') {
-      temp = temp.filter(item => item.location?.toLowerCase().includes(location.toLowerCase()));
-    }
-    setFilteredListings(temp);
-  };
-
   const handleSelectListingType = (type: string) => {
     setListingType(type);
     setSelectedCategory('All');
-    applyFilters(listings, searchQuery, locationQuery, 'All', type);
   };
 
   async function handlePickProductImage() {
+    if (newImageUrls.length >= MAX_PHOTOS) {
+      Alert.alert('Photo Limit Reached', `You can add up to ${MAX_PHOTOS} photos per listing.`);
+      return;
+    }
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission Required', 'Sizana needs camera roll access to add photos.');
@@ -177,14 +226,15 @@ export default function MarketScreen({ route, session: directSession, navigation
   async function uploadProductImage(localUri: string) {
     try {
       setUploading(true);
-      const fileExt = localUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const compressed = await compressImage(localUri, { maxDimension: 1600 });
+      const fileExt = 'jpg';
       const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
 
       const formData = new FormData();
       formData.append('file', {
-        uri: localUri,
+        uri: compressed.uri,
         name: fileName,
-        type: `image/${fileExt === 'png' ? 'png' : 'jpeg'}`
+        type: 'image/jpeg'
       } as any);
 
       const { error: uploadError } = await supabase.storage
@@ -197,13 +247,16 @@ export default function MarketScreen({ route, session: directSession, navigation
         .from('Listings')
         .getPublicUrl(fileName);
 
-      setNewImageUrl(publicUrl);
-      Alert.alert('Image Uploaded', 'Photo staged successfully!');
+      setNewImageUrls(prev => [...prev, publicUrl]);
     } catch (error: any) {
       Alert.alert('Upload Failed', error.message);
     } finally {
       setUploading(false);
     }
+  }
+
+  function handleRemoveImage(index: number) {
+    setNewImageUrls(prev => prev.filter((_, i) => i !== index));
   }
 
   async function handleCreateListing() {
@@ -221,7 +274,8 @@ export default function MarketScreen({ route, session: directSession, navigation
         category: newCategory,
         location: newLocation,
         description: newDescription,
-        image_url: newImageUrl,
+        image_url: newImageUrls[0] || null,
+        image_urls: newImageUrls,
         listing_type: creatingListingType,
         business_id: creatingListingType === 'job' ? postingAsBusinessId : null,
       };
@@ -256,7 +310,7 @@ export default function MarketScreen({ route, session: directSession, navigation
     setNewTitle('');
     setNewPrice('');
     setNewDescription('');
-    setNewImageUrl('');
+    setNewImageUrls([]);
     setNewLocation('Schweizer-Reneke');
     setEditingItemId(null);
     setPostingAsBusinessId(null);
@@ -279,7 +333,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           setNewDescription(item.description || '');
           setNewLocation(item.location || 'Schweizer-Reneke');
           setNewCategory(item.category);
-          setNewImageUrl(item.image_url || '');
+          setNewImageUrls(item.image_urls?.length ? item.image_urls : (item.image_url ? [item.image_url] : []));
           setEditingItemId(item.id);
           setCreatingListingType(item.listing_type);
           setPostingAsBusinessId(item.business_id || null);
@@ -320,11 +374,11 @@ export default function MarketScreen({ route, session: directSession, navigation
       }}
     >
       <View style={styles.imageContainer}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+        {(item.image_urls?.[0] || item.image_url) ? (
+          <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.cardImage} />
         ) : (
           <View style={styles.placeholderImage}>
-            <Ionicons name="image-outline" size={40} color="#CBD5E1" />
+            <Ionicons name="image-outline" size={40} color={colors.borderStrong} />
           </View>
         )}
         <View style={styles.categoryBadge}>
@@ -332,7 +386,13 @@ export default function MarketScreen({ route, session: directSession, navigation
         </View>
         {item.business_id && (
           <View style={styles.businessBadge}>
-            <Ionicons name="briefcase" size={10} color="#fff" />
+            <Ionicons name="briefcase" size={10} color={colors.white} />
+          </View>
+        )}
+        {item.image_urls?.length > 1 && (
+          <View style={styles.photoCountBadge}>
+            <Ionicons name="images" size={10} color={colors.white} />
+            <Text style={styles.photoCountText}>{item.image_urls.length}</Text>
           </View>
         )}
       </View>
@@ -343,7 +403,7 @@ export default function MarketScreen({ route, session: directSession, navigation
         </Text>
         <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
         <View style={styles.locationContainer}>
-          <Ionicons name="location" size={12} color="#34C759" />
+          <Ionicons name="location" size={12} color={colors.brand} />
           <Text style={styles.cardLocation} numberOfLines={1}>{item.location}</Text>
         </View>
       </View>
@@ -372,7 +432,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                 style={[styles.typeTab, active && styles.typeTabActive]}
                 onPress={() => handleSelectListingType(item.key)}
               >
-                <Ionicons name={item.icon} size={16} color={active ? '#fff' : '#475569'} style={{ marginRight: 6 }} />
+                <Ionicons name={item.icon} size={16} color={active ? colors.white : colors.slate[600]} style={{ marginRight: 6 }} />
                 <Text style={[styles.typeTabText, active && styles.typeTabTextActive]}>{item.label}</Text>
               </TouchableOpacity>
             );
@@ -382,45 +442,35 @@ export default function MarketScreen({ route, session: directSession, navigation
 
       <View style={styles.filterHeaderLayout}>
         <View style={[styles.searchBarContainer, { flex: 1, marginRight: 6 }]}>
-          <Ionicons name="search" size={18} color="#94A3B8" style={styles.searchIcon} />
+          <Ionicons name="search" size={18} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder={`Search ${LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()}...`}
             value={searchQuery}
-            onChangeText={(t) => { setSearchQuery(t); applyFilters(listings, t, locationQuery, selectedCategory, listingType); }}
+            onChangeText={setSearchQuery}
           />
         </View>
         <View style={[styles.searchBarContainer, { width: '38%', marginLeft: 6 }]}>
-          <Ionicons name="location" size={18} color="#34C759" style={styles.searchIcon} />
+          <Ionicons name="location" size={18} color={colors.brand} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Location..."
             value={locationQuery}
-            onChangeText={(t) => { setLocationQuery(t); applyFilters(listings, searchQuery, t, selectedCategory, listingType); }}
+            onChangeText={setLocationQuery}
           />
         </View>
       </View>
 
       <View style={{ maxHeight: 50, marginBottom: 6 }}>
-        <FlatList
-          data={CATEGORY_MAP[listingType]}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoriesContainer}
-          keyExtractor={(item) => item}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.categoryPill, selectedCategory === item && styles.categoryPillActive]}
-              onPress={() => { setSelectedCategory(item); applyFilters(listings, searchQuery, locationQuery, item, listingType); }}
-            >
-              <Text style={[styles.categoryText, selectedCategory === item && styles.categoryTextActive]}>{item}</Text>
-            </TouchableOpacity>
-          )}
+        <CategoryPicker
+          categories={CATEGORY_MAP[listingType]}
+          selected={selectedCategory}
+          onSelect={setSelectedCategory}
         />
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
           data={filteredListings}
@@ -430,18 +480,21 @@ export default function MarketScreen({ route, session: directSession, navigation
           renderItem={renderMarketItem}
           contentContainerStyle={styles.gridContainer}
           columnWrapperStyle={styles.gridColumnWrapper}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#34C759']} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.brand]} />}
+          onEndReached={loadMoreListings}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="alert-circle-outline" size={50} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No {LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()} found here.</Text>
-            </View>
+            <EmptyState
+              icon="alert-circle-outline"
+              title={`No ${LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()} found here.`}
+            />
           }
         />
       )}
 
       <TouchableOpacity style={styles.fab} activeOpacity={0.8} onPress={openCreateModal}>
-        <Ionicons name="add" size={24} color="#fff" />
+        <Ionicons name="add" size={24} color={colors.white} />
         <Text style={styles.fabText}>{FAB_LABEL[listingType]}</Text>
       </TouchableOpacity>
 
@@ -458,7 +511,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                 {editingItemId ? 'Edit Listing' : `New ${LISTING_TYPES.find(t => t.key === creatingListingType)?.label.slice(0, -1)}`}
               </Text>
               <TouchableOpacity onPress={() => { setModalVisible(false); clearForm(); }}>
-                <Ionicons name="close-circle" size={28} color="#64748B" />
+                <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -472,7 +525,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                       style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
                       onPress={() => setPostingAsBusinessId(null)}
                     >
-                      <Ionicons name="person" size={14} color={postingAsBusinessId === null ? '#34C759' : '#64748B'} />
+                      <Ionicons name="person" size={14} color={postingAsBusinessId === null ? colors.brand : colors.textSecondary} />
                       <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>Myself</Text>
                     </TouchableOpacity>
                     {ownedBusinesses.map((biz) => (
@@ -481,7 +534,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                         style={[styles.identityPill, postingAsBusinessId === biz.id && styles.identityPillActive]}
                         onPress={() => setPostingAsBusinessId(biz.id)}
                       >
-                        <Ionicons name="briefcase" size={14} color={postingAsBusinessId === biz.id ? '#34C759' : '#64748B'} />
+                        <Ionicons name="briefcase" size={14} color={postingAsBusinessId === biz.id ? colors.brand : colors.textSecondary} />
                         <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>{biz.name}</Text>
                       </TouchableOpacity>
                     ))}
@@ -489,18 +542,36 @@ export default function MarketScreen({ route, session: directSession, navigation
                 </>
               )}
 
-              <TouchableOpacity style={styles.modalImageSelector} onPress={handlePickProductImage}>
-                {newImageUrl ? (
-                  <Image source={{ uri: newImageUrl }} style={styles.selectedProductImage} />
-                ) : uploading ? (
-                  <ActivityIndicator color="#34C759" />
-                ) : (
-                  <>
-                    <Ionicons name="camera" size={36} color="#94A3B8" />
-                    <Text style={styles.imageSelectorText}>Add Photo</Text>
-                  </>
+              <Text style={styles.fieldLabel}>
+                Photos ({newImageUrls.length}/{MAX_PHOTOS}) — first photo is the cover
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                {newImageUrls.map((uri, index) => (
+                  <View key={uri + index} style={styles.photoThumbWrap}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                    {index === 0 && (
+                      <View style={styles.coverBadge}>
+                        <Text style={styles.coverBadgeText}>Cover</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity style={styles.removePhotoButton} onPress={() => handleRemoveImage(index)}>
+                      <Ionicons name="close" size={14} color={colors.white} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {newImageUrls.length < MAX_PHOTOS && (
+                  <TouchableOpacity style={styles.addPhotoTile} onPress={handlePickProductImage} disabled={uploading}>
+                    {uploading ? (
+                      <ActivityIndicator color={colors.brand} />
+                    ) : (
+                      <>
+                        <Ionicons name="camera" size={28} color={colors.textTertiary} />
+                        <Text style={styles.imageSelectorText}>Add Photo</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </ScrollView>
 
               <Text style={styles.fieldLabel}>Title</Text>
               <TextInput style={styles.modalInput} value={newTitle} onChangeText={setNewTitle} placeholder="e.g., Yellow Maize Bags" />
@@ -545,63 +616,62 @@ export default function MarketScreen({ route, session: directSession, navigation
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   typeTabsContainer: { paddingHorizontal: 14, alignItems: 'center' },
-  typeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, marginRight: 8 },
-  typeTabActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  typeTabText: { fontSize: 13, fontWeight: '700', color: '#475569' },
-  typeTabTextActive: { color: '#fff' },
+  typeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, marginRight: 8 },
+  typeTabActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  typeTabText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.slate[600] },
+  typeTabTextActive: { color: colors.white },
 
   filterHeaderLayout: { flexDirection: 'row', paddingHorizontal: 14, marginTop: 10, marginBottom: 4, alignItems: 'center' },
-  searchBarContainer: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', height: 46 },
+  searchBarContainer: { flexDirection: 'row', backgroundColor: colors.white, paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.border, height: 46 },
   searchIcon: { marginRight: 6 },
-  searchInput: { flex: 1, height: '100%', fontSize: 14, color: '#334155', fontWeight: '500' },
-  categoriesContainer: { paddingHorizontal: 14, paddingVertical: 4 },
-  categoryPill: { backgroundColor: '#E2E8F0', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, height: 36, justifyContent: 'center' },
-  categoryPillActive: { backgroundColor: '#34C759' },
-  categoryText: { fontSize: 13, color: '#475569', fontWeight: '700' },
-  categoryTextActive: { color: '#fff' },
+  searchInput: { flex: 1, height: '100%', fontSize: 14, color: colors.slate[700], fontFamily: fontFamily.medium },
   gridContainer: { padding: 14, paddingBottom: 100 },
   gridColumnWrapper: { justifyContent: 'space-between' },
-  card: { backgroundColor: '#fff', width: COLUMN_WIDTH, borderRadius: 20, marginBottom: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 8 },
-  imageContainer: { width: '100%', height: COLUMN_WIDTH * 1.1, backgroundColor: '#F1F5F9' },
+  card: { backgroundColor: colors.white, width: COLUMN_WIDTH, borderRadius: 20, marginBottom: 14, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 8 },
+  imageContainer: { width: '100%', height: COLUMN_WIDTH * 1.1, backgroundColor: colors.slate[100] },
   cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   placeholderImage: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   categoryBadge: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  categoryBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  categoryBadgeText: { color: colors.white, fontSize: 10, fontFamily: fontFamily.bold },
   businessBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: '#8B5CF6', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
   cardDetails: { padding: 12 },
-  cardPrice: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
-  cardTitle: { fontSize: 14, color: '#475569', fontWeight: '600', marginTop: 2 },
+  cardPrice: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  cardTitle: { fontSize: 14, color: colors.slate[600], fontFamily: fontFamily.semibold, marginTop: 2 },
   locationContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  cardLocation: { fontSize: 12, color: '#94A3B8', marginLeft: 4, fontWeight: '500', flex: 1 },
-  fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: '#34C759', flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, alignItems: 'center', elevation: 5, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
-  fabText: { color: '#fff', fontSize: 16, fontWeight: '700', marginLeft: 6 },
-  emptyContainer: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 15, fontWeight: '600', marginTop: 12 },
+  cardLocation: { fontSize: 12, color: colors.textTertiary, marginLeft: 4, fontFamily: fontFamily.medium, flex: 1 },
+  fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: colors.brand, flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, alignItems: 'center', elevation: 5, shadowColor: colors.brand, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
+  fabText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold, marginLeft: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
+  modalContent: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  modalImageSelector: { height: 150, backgroundColor: '#F1F5F9', borderRadius: 16, borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 16, overflow: 'hidden' },
-  selectedProductImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imageSelectorText: { fontSize: 13, color: '#64748B', fontWeight: '600', marginTop: 6 },
-  fieldLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 6, marginLeft: 2 },
-  modalInput: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#334155', marginBottom: 14, fontWeight: '500' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  imageSelectorText: { fontSize: 12, color: colors.textSecondary, fontFamily: fontFamily.semibold, marginTop: 4 },
+  photoThumbWrap: { width: 100, height: 100, borderRadius: 14, marginRight: 10, overflow: 'hidden', position: 'relative', backgroundColor: colors.slate[100] },
+  photoThumb: { width: '100%', height: '100%', resizeMode: 'cover' },
+  coverBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(27,113,51,0.9)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  coverBadgeText: { color: colors.white, fontSize: 9, fontFamily: fontFamily.extrabold },
+  removePhotoButton: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' },
+  addPhotoTile: { width: 100, height: 100, borderRadius: 14, backgroundColor: colors.slate[100], borderStyle: 'dashed', borderWidth: 2, borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center' },
+  photoCountBadge: { position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  photoCountText: { color: colors.white, fontSize: 10, fontFamily: fontFamily.bold, marginLeft: 4 },
+  fieldLabel: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: 6, marginLeft: 2 },
+  modalInput: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.slate[700], marginBottom: 14, fontFamily: fontFamily.medium },
   modalTextArea: { height: 70, textAlignVertical: 'top' },
   modalCategoryRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 14 },
-  modalCatPill: { backgroundColor: '#E2E8F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, marginRight: 6, marginBottom: 6 },
-  modalCatPillActive: { backgroundColor: '#34C759' },
-  modalCatText: { fontSize: 12, color: '#475569', fontWeight: '700' },
-  modalCatTextActive: { color: '#fff' },
-  submitListingButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 10 },
-  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  modalCatPill: { backgroundColor: colors.border, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, marginRight: 6, marginBottom: 6 },
+  modalCatPillActive: { backgroundColor: colors.brand },
+  modalCatText: { fontSize: 12, color: colors.slate[600], fontFamily: fontFamily.bold },
+  modalCatTextActive: { color: colors.white },
+  submitListingButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 10 },
+  submitButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
 
   identityRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
-  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#F8FAFC', borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
-  identityText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
-  identityTextActive: { color: '#34C759' },
+  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, backgroundColor: colors.backgroundMuted, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  identityPillActive: { backgroundColor: colors.brandSubtle, borderColor: colors.brand },
+  identityText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 6 },
+  identityTextActive: { color: colors.brand },
 });

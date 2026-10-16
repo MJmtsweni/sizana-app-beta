@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 
+import { colors, fontFamily } from '../../theme';
 type RatingModalProps = {
   visible: boolean;
   onClose: () => void;
@@ -81,18 +82,18 @@ export default function RatingModal({ visible, onClose, raterId, rateeId, rateeN
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{
-            backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+            backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28,
             padding: 24, paddingBottom: Math.max(insets.bottom, 24),
           }}
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Text style={{ fontSize: 20, fontWeight: '800', color: '#1E293B' }}>Rate {rateeName}</Text>
+            <Text style={{ fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary }}>Rate {rateeName}</Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close-circle" size={28} color="#64748B" />
+              <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <Text style={{ fontSize: 14, color: '#475569', marginBottom: 20, textAlign: 'center' }}>
+          <Text style={{ fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], marginBottom: 20, textAlign: 'center' }}>
             How was your experience with {rateeName}?
           </Text>
 
@@ -102,23 +103,23 @@ export default function RatingModal({ visible, onClose, raterId, rateeId, rateeN
                 <Ionicons
                   name={score >= star ? "star" : "star-outline"}
                   size={40}
-                  color={score >= star ? "#F59E0B" : "#CBD5E1"}
+                  color={score >= star ? colors.warning : colors.borderStrong}
                 />
               </TouchableOpacity>
             ))}
           </View>
 
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 }}>
+          <Text style={{ fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 }}>
             Add a comment (Optional)
           </Text>
           <TextInput
             style={{
-              backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12,
-              paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: '#1E293B',
+              backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12,
+              paddingHorizontal: 16, paddingVertical: 14, fontFamily: fontFamily.regular, fontSize: 15, color: colors.textPrimary,
               height: 100, textAlignVertical: 'top', marginBottom: 24,
             }}
             placeholder="Tell the community what you loved..."
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={colors.textTertiary}
             multiline
             value={comment}
             onChangeText={setComment}
@@ -126,13 +127,13 @@ export default function RatingModal({ visible, onClose, raterId, rateeId, rateeN
 
           <TouchableOpacity
             style={{
-              backgroundColor: score > 0 ? '#34C759' : '#CBD5E1',
+              backgroundColor: score > 0 ? colors.brand : colors.borderStrong,
               paddingVertical: 16, borderRadius: 16, alignItems: 'center',
             }}
             onPress={handleSubmit}
             disabled={score === 0 || submitting}
           >
-            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Submit Review</Text>}
+            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={{ color: colors.white, fontSize: 16, fontFamily: fontFamily.bold }}>Submit Review</Text>}
           </TouchableOpacity>
         </KeyboardAvoidingView>
       </View>

@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import ListingDetailsModal from './ListingDetailsModal';
 
+import { colors, fontFamily } from '../../theme';
 const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 48) / 2;
 
@@ -23,8 +24,30 @@ const LISTING_TYPE_TABS: { key: string; label: string; icon: any }[] = [
 ];
 
 export default function PublicProfileScreen({ route, navigation }: any) {
-  const { userProfile, session } = route.params;
+  const { userProfile, session } = route.params || {};
   const insets = useSafeAreaInsets();
+
+  // Whoever navigated here passed a missing/undefined profile — fail gracefully
+  // instead of crashing on userProfile.id below. This can't fully replace fixing
+  // the actual caller, but it means a bad navigation call degrades to an error
+  // screen instead of a hard crash, no matter which screen the tap came from.
+  if (!userProfile || !userProfile.id) {
+    return (
+      <View style={styles.mainContainer}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 45) }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Public Profile</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.emptyState}>
+          <Ionicons name="person-remove-outline" size={48} color={colors.borderStrong} />
+          <Text style={styles.emptyStateText}>This profile isn't available right now.</Text>
+        </View>
+      </View>
+    );
+  }
 
   const [activeTab, setActiveTab] = useState<'Posts' | 'Listings'>('Posts');
   const [listingTypeFilter, setListingTypeFilter] = useState('All');
@@ -231,11 +254,11 @@ if (userProfile?.interests) {
       <Text style={styles.postBodyText} numberOfLines={2}>{item.content}</Text>
       <View style={styles.postFooter}>
         <View style={styles.actionPill}>
-          <Ionicons name="heart" size={16} color={item.isLiked ? "#EF4444" : "#94A3B8"} />
+          <Ionicons name="heart" size={16} color={item.isLiked ? colors.danger : colors.textTertiary} />
           <Text style={styles.actionPillText}>{item.likesCount}</Text>
         </View>
         <View style={styles.actionPill}>
-          <Ionicons name="chatbox" size={16} color="#94A3B8" />
+          <Ionicons name="chatbox" size={16} color={colors.textTertiary} />
           <Text style={styles.actionPillText}>{item.commentsCount}</Text>
         </View>
       </View>
@@ -254,14 +277,14 @@ if (userProfile?.interests) {
         }}
       >
         <View style={styles.listingImageContainer}>
-          {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.listingImage} />
+          {(item.image_urls?.[0] || item.image_url) ? (
+            <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.listingImage} />
           ) : (
-            <Ionicons name="image-outline" size={40} color="#CBD5E1" />
+            <Ionicons name="image-outline" size={40} color={colors.borderStrong} />
           )}
           {typeInfo && (
             <View style={styles.listingTypeBadge}>
-              <Ionicons name={typeInfo.icon} size={10} color="#fff" />
+              <Ionicons name={typeInfo.icon} size={10} color={colors.white} />
             </View>
           )}
         </View>
@@ -284,7 +307,7 @@ if (userProfile?.interests) {
       {/* HEADER */}
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 45) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#1E293B" />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Public Profile</Text>
         <View style={{ width: 40 }} />
@@ -305,7 +328,7 @@ if (userProfile?.interests) {
                 {userProfile.avatar_url ? (
                   <Image source={{ uri: userProfile.avatar_url }} style={styles.avatarImage} />
                 ) : (
-                  <Ionicons name="person-circle" size={80} color="#CBD5E1" />
+                  <Ionicons name="person-circle" size={80} color={colors.borderStrong} />
                 )}
               </View>
               <View style={styles.userInfoBlock}>
@@ -314,7 +337,7 @@ if (userProfile?.interests) {
                 <View style={styles.metaBadgeRow}>
                   {userProfile.location && (
                     <View style={styles.metaBadge}>
-                      <Ionicons name="location" size={12} color="#34C759" />
+                      <Ionicons name="location" size={12} color={colors.brand} />
                       <Text style={styles.metaBadgeText}>{userProfile.location}</Text>
                     </View>
                   )}
@@ -345,29 +368,29 @@ if (userProfile?.interests) {
                   onPress={handleToggleFollow}
                   disabled={socialLoading}
                 >
-                  <Ionicons name={isFollowing ? "checkmark" : "add"} size={16} color={isFollowing ? "#fff" : "#fff"} />
+                  <Ionicons name={isFollowing ? "checkmark" : "add"} size={16} color={isFollowing ? colors.white : colors.white} />
                   <Text style={styles.primaryButtonText}>{isFollowing ? 'Following' : 'Follow'}</Text>
                 </TouchableOpacity>
 
                 {friendStatus === 'none' ? (
                   <TouchableOpacity style={styles.secondaryButton} onPress={handleAddFriend} disabled={socialLoading}>
-                    <Ionicons name="person-add" size={16} color="#1E293B" />
+                    <Ionicons name="person-add" size={16} color={colors.textPrimary} />
                     <Text style={styles.secondaryButtonText}>Add Friend</Text>
                   </TouchableOpacity>
                 ) : friendStatus === 'pending' ? (
-                  <View style={[styles.secondaryButton, { backgroundColor: '#F1F5F9' }]}>
-                    <Ionicons name="time" size={16} color="#64748B" />
-                    <Text style={[styles.secondaryButtonText, { color: '#64748B' }]}>Requested</Text>
+                  <View style={[styles.secondaryButton, { backgroundColor: colors.slate[100] }]}>
+                    <Ionicons name="time" size={16} color={colors.textSecondary} />
+                    <Text style={[styles.secondaryButtonText, { color: colors.textSecondary }]}>Requested</Text>
                   </View>
                 ) : (
-                  <View style={[styles.secondaryButton, { backgroundColor: '#F0FDF4', borderColor: '#DCFCE7' }]}>
-                    <Ionicons name="people" size={16} color="#34C759" />
-                    <Text style={[styles.secondaryButtonText, { color: '#34C759' }]}>Friends</Text>
+                  <View style={[styles.secondaryButton, { backgroundColor: colors.brandSubtle, borderColor: colors.brandSubtleStrong }]}>
+                    <Ionicons name="people" size={16} color={colors.brand} />
+                    <Text style={[styles.secondaryButtonText, { color: colors.brand }]}>Friends</Text>
                   </View>
                 )}
 
                 <TouchableOpacity style={styles.iconButton} onPress={handleMessageUser}>
-                  <Ionicons name="chatbubbles" size={20} color="#3B82F6" />
+                  <Ionicons name="chatbubbles" size={20} color={colors.accent} />
                 </TouchableOpacity>
               </View>
             )}
@@ -397,7 +420,7 @@ if (userProfile?.interests) {
                       style={[styles.subTypeTab, active && styles.subTypeTabActive]}
                       onPress={() => setListingTypeFilter(item.key)}
                     >
-                      <Ionicons name={item.icon} size={13} color={active ? '#fff' : '#64748B'} style={{ marginRight: 5 }} />
+                      <Ionicons name={item.icon} size={13} color={active ? colors.white : colors.textSecondary} style={{ marginRight: 5 }} />
                       <Text style={[styles.subTypeTabText, active && styles.subTypeTabTextActive]}>{item.label}</Text>
                     </TouchableOpacity>
                   );
@@ -408,10 +431,10 @@ if (userProfile?.interests) {
         }
         ListEmptyComponent={
           loading ? (
-            <ActivityIndicator size="large" color="#34C759" style={{ marginTop: 40 }} />
+            <ActivityIndicator size="large" color={colors.brand} style={{ marginTop: 40 }} />
           ) : (
             <View style={styles.emptyState}>
-              <Ionicons name={activeTab === 'Posts' ? "chatbubbles-outline" : "pricetag-outline"} size={48} color="#CBD5E1" />
+              <Ionicons name={activeTab === 'Posts' ? "chatbubbles-outline" : "pricetag-outline"} size={48} color={colors.borderStrong} />
               <Text style={styles.emptyStateText}>
                 {activeTab === 'Posts' 
                   ? 'No posts available yet.' 
@@ -437,68 +460,68 @@ if (userProfile?.interests) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
+  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   
-  profileHeaderSection: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  profileHeaderSection: { backgroundColor: colors.white, borderRadius: 20, padding: 20, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   avatarRow: { flexDirection: 'row', alignItems: 'center' },
-  avatarWrapper: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#F1F5F9', overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#E2E8F0' },
+  avatarWrapper: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.slate[100], overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.border },
   avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   userInfoBlock: { marginLeft: 16, flex: 1 },
-  usernameText: { fontSize: 22, fontWeight: '800', color: '#1E293B' },
+  usernameText: { fontSize: 22, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   metaBadgeRow: { flexDirection: 'row', marginTop: 6 },
-  metaBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FDF4', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  metaBadgeText: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
+  metaBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.brandSubtle, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  metaBadgeText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 4 },
   
-  bioText: { fontSize: 14, color: '#475569', marginTop: 16, lineHeight: 22 },
+  bioText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], marginTop: 16, lineHeight: 22 },
   
   interestsContainer: { 
   flexDirection: 'row', 
   flexWrap: 'wrap', 
   marginTop: 16 
 },
-  interestPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  interestPillText: { fontSize: 12, fontWeight: '600', color: '#475569' },
+  interestPill: { backgroundColor: colors.slate[100], paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  interestPillText: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.slate[600] },
   
   socialActionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 24, gap: 8 },
-  primaryButton: { flex: 1.5, flexDirection: 'row', backgroundColor: '#3B82F6', height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-  buttonActive: { backgroundColor: '#34C759' },
-  primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '700', marginLeft: 6 },
-  secondaryButton: { flex: 1.5, flexDirection: 'row', backgroundColor: '#fff', height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
-  secondaryButtonText: { color: '#1E293B', fontSize: 14, fontWeight: '700', marginLeft: 6 },
-  iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center' },
+  primaryButton: { flex: 1.5, flexDirection: 'row', backgroundColor: colors.accent, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  buttonActive: { backgroundColor: colors.brand },
+  primaryButtonText: { color: colors.white, fontSize: 14, fontFamily: fontFamily.bold, marginLeft: 6 },
+  secondaryButton: { flex: 1.5, flexDirection: 'row', backgroundColor: colors.white, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  secondaryButtonText: { color: colors.textPrimary, fontSize: 14, fontFamily: fontFamily.bold, marginLeft: 6 },
+  iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSubtle, justifyContent: 'center', alignItems: 'center' },
   
-  tabContainer: { flexDirection: 'row', marginTop: 24, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  tabContainer: { flexDirection: 'row', marginTop: 24, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  activeTab: { borderBottomWidth: 2, borderBottomColor: '#34C759' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#94A3B8' },
-  activeTabText: { color: '#34C759', fontWeight: '800' },
+  activeTab: { borderBottomWidth: 2, borderBottomColor: colors.brand },
+  tabText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textTertiary },
+  activeTabText: { color: colors.brand, fontFamily: fontFamily.extrabold },
 
   subTypeTabsContainer: { paddingTop: 14, paddingBottom: 2, alignItems: 'center' },
-  subTypeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, marginRight: 8 },
-  subTypeTabActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  subTypeTabText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
-  subTypeTabTextActive: { color: '#fff' },
+  subTypeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, marginRight: 8 },
+  subTypeTabActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  subTypeTabText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  subTypeTabTextActive: { color: colors.white },
   
-  postCard: { backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
-  postTopicBadge: { fontSize: 11, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase' },
-  postDateText: { fontSize: 12, color: '#94A3B8', fontWeight: '500' },
-  postTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
-  postBodyText: { fontSize: 14, color: '#475569', lineHeight: 20 },
-  postFooter: { flexDirection: 'row', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  postCard: { backgroundColor: colors.white, padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.border },
+  postTopicBadge: { fontSize: 11, fontFamily: fontFamily.extrabold, color: colors.accent, textTransform: 'uppercase' },
+  postDateText: { fontSize: 12, color: colors.textTertiary, fontFamily: fontFamily.medium },
+  postTitle: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 6 },
+  postBodyText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], lineHeight: 20 },
+  postFooter: { flexDirection: 'row', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.slate[100] },
   actionPill: { flexDirection: 'row', alignItems: 'center', marginRight: 16 },
-  actionPillText: { fontSize: 13, color: '#64748B', fontWeight: '600', marginLeft: 6 },
+  actionPillText: { fontSize: 13, color: colors.textSecondary, fontFamily: fontFamily.semibold, marginLeft: 6 },
   
-  listingCard: { backgroundColor: '#fff', width: COLUMN_WIDTH, borderRadius: 16, marginBottom: 16, marginHorizontal: 4, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0' },
-  listingImageContainer: { width: '100%', height: COLUMN_WIDTH, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  listingCard: { backgroundColor: colors.white, width: COLUMN_WIDTH, borderRadius: 16, marginBottom: 16, marginHorizontal: 4, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
+  listingImageContainer: { width: '100%', height: COLUMN_WIDTH, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' },
   listingImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   listingTypeBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(30,41,59,0.7)', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   listingDetails: { padding: 12 },
-  listingPrice: { fontSize: 15, fontWeight: '800', color: '#1E293B' },
-  listingTitle: { fontSize: 13, color: '#64748B', fontWeight: '500', marginTop: 2 },
+  listingPrice: { fontSize: 15, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  listingTitle: { fontSize: 13, color: colors.textSecondary, fontFamily: fontFamily.medium, marginTop: 2 },
   
   emptyState: { alignItems: 'center', marginTop: 40 },
-  emptyStateText: { fontSize: 14, color: '#94A3B8', fontWeight: '500', marginTop: 12 }
+  emptyStateText: { fontSize: 14, color: colors.textTertiary, fontFamily: fontFamily.medium, marginTop: 12 }
 });

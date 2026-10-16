@@ -1,5 +1,5 @@
 import * as Linking from 'expo-linking';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TouchableOpacity, Image, 
   TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
@@ -10,13 +10,17 @@ import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import { compressImage } from '../../lib/mediaCompression';
+import { withRetry } from '../../lib/network';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUserLocation } from '../../hooks/useUserLocation';
 import { useDeviceLocation } from '../../hooks/useDeviceLocation';
 import { useLocationCapture } from '../../hooks/useLocationCapture';
-import { getDistanceKm, formatDistance } from '../../lib/distance';
+import { getDistanceKm, formatDistance, NEARBY_RADIUS_KM } from '../../lib/distance';
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
+import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
+import { colors, fontFamily } from '../../theme';
 export default function EventsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
@@ -24,10 +28,17 @@ export default function EventsScreen({ navigation, route }: any) {
   const [eventDate, setEventDate] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [eventTime, setEventTime] = useState(new Date());
 
-  const [allEvents, setAllEvents] = useState<any[]>([]);
-  const [filteredEvents, setFilteredEvents] = useState<any[]>([]);
+  // One paginated dataset serves Upcoming/Past across all three scopes (see
+  // fetchEventsPage). My RSVPs is handled separately, unpaginated — it's
+  // inherently bounded by how many events one user has RSVP'd to, not by
+  // the size of the events table, so it doesn't need the same treatment.
+  const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const isFirstFilterRun = useRef(true);
   const [activeTab, setActiveTab] = useState('Upcoming');
 
   const [showFilters, setShowFilters] = useState(false);
@@ -69,12 +80,32 @@ export default function EventsScreen({ navigation, route }: any) {
     useCallback(() => {
       fetchEvents();
       fetchUserBusinesses();
-    }, [activeTab, session?.user?.id])
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, scope, session?.user?.id])
   );
 
-  React.useEffect(() => {
-    applyFilters();
-  }, [searchLocation, searchCategory, searchDate, allEvents, activeTab, scope, myLocation, deviceCoords]);
+  // Location/GPS resolving asynchronously after mount needs its own
+  // trigger — Home/Nearby depend on it but it isn't known yet when the
+  // focus effect above first runs.
+  useEffect(() => {
+    if (scope === 'explore') return;
+    fetchEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation, deviceCoords, scope]);
+
+  // Search filters are applied server-side (for Upcoming/Past) or
+  // client-side over the small RSVP set (for My RSVPs) — either way, a
+  // change re-fetches page 0 rather than re-filtering an in-memory array.
+  // Debounced so search-as-you-type doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (isFirstFilterRun.current) {
+      isFirstFilterRun.current = false;
+      return;
+    }
+    const handle = setTimeout(() => { fetchEvents(); }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchLocation, searchCategory, searchDate]);
 
   async function fetchUserBusinesses() {
     if (!session?.user?.id) return;
@@ -91,32 +122,140 @@ export default function EventsScreen({ navigation, route }: any) {
     }
   }
 
+  function formatEvent(ev: any) {
+    return {
+      ...ev,
+      rsvpCount: ev.rsvps ? ev.rsvps.length : 0,
+      isAttending: ev.rsvps ? ev.rsvps.some((r: any) => r.user_id === session?.user?.id) : false,
+      isPast: new Date(ev.event_date) < new Date(),
+    };
+  }
+
+  const EVENT_SELECT = `*, creator:creator_id ( * ), business:business_id ( * ), rsvps:event_rsvps ( user_id )`;
+
+  async function hydrateEventIds(ids: string[]) {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabase.from('events').select(EVENT_SELECT).in('id', ids);
+    if (error) throw error;
+    return ids
+      .map(id => data?.find((e: any) => e.id === id))
+      .filter(Boolean)
+      .map(formatEvent);
+  }
+
+  // Every private event the user is entitled to see: public ones, their
+  // own, or ones they've RSVP'd to (an invite doesn't require being the
+  // creator). Used to build the OR filter for Upcoming/Past below.
+  async function getUserRsvpEventIds(): Promise<string[]> {
+    const { data } = await supabase.from('event_rsvps').select('event_id').eq('user_id', session.user.id);
+    return (data || []).map((r: any) => r.event_id);
+  }
+
+  // A specific typed date takes precedence over the tab's implicit range —
+  // searching a date is a stronger signal than "upcoming vs past".
+  function computeDateRange(): { after: string | null; before: string | null } {
+    if (searchDate.trim()) {
+      const d = searchDate.trim();
+      return { after: `${d}T00:00:00`, before: `${d}T23:59:59.999` };
+    }
+    const nowIso = new Date().toISOString();
+    if (activeTab === 'Upcoming') return { after: nowIso, before: null };
+    return { after: null, before: nowIso }; // Past
+  }
+
+  // My RSVPs is inherently small (bounded by the user's own activity, not
+  // the events table), so it's fetched whole and filtered/sorted client-side
+  // rather than going through the same paginated machinery as the other tabs.
+  async function fetchMyRsvpEvents(): Promise<any[]> {
+    const { data, error } = await withRetry(() => supabase
+      .from('event_rsvps')
+      .select(`events ( ${EVENT_SELECT} )`)
+      .eq('user_id', session.user.id));
+    if (error) throw error;
+
+    let evts = (data || []).map((r: any) => r.events).filter(Boolean).map(formatEvent);
+
+    if (searchCategory !== 'All') evts = evts.filter((e: any) => e.category === searchCategory);
+    if (searchLocation.trim()) evts = evts.filter((e: any) => e.location?.toLowerCase().includes(searchLocation.trim().toLowerCase()));
+    if (searchDate.trim()) evts = evts.filter((e: any) => e.event_date.startsWith(searchDate.trim()));
+
+    if (scope === 'nearby' && deviceCoords) {
+      evts = evts
+        .filter((e: any) => e.latitude != null && e.longitude != null)
+        .map((e: any) => ({ ...e, _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, e.latitude, e.longitude) }))
+        .sort((a: any, b: any) => a._distanceKm - b._distanceKm);
+    } else if (scope === 'home' || scope === 'nearby') {
+      if (!myLocation) return [];
+      evts = evts.filter((e: any) => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
+    } else {
+      evts.sort((a: any, b: any) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+    }
+
+    return evts;
+  }
+
+  async function fetchEventsPage(pageNum: number): Promise<any[]> {
+    const [from, to] = pageRange(pageNum);
+    const { after, before } = computeDateRange();
+
+    if (scope === 'nearby' && deviceCoords) {
+      const { data, error } = await withRetry(() => supabase.rpc('nearby_events', {
+        p_lat: deviceCoords.latitude,
+        p_lng: deviceCoords.longitude,
+        p_user_id: session.user.id,
+        p_radius_km: NEARBY_RADIUS_KM,
+        p_category: searchCategory !== 'All' ? searchCategory : null,
+        p_after: after,
+        p_before: before,
+        p_limit: PAGE_SIZE,
+        p_offset: from,
+      }));
+      if (error) throw error;
+      const ranked = data || [];
+      if (ranked.length === 0) return [];
+      const distanceById = new Map(ranked.map((r: any) => [r.id, r.distance_km]));
+      const hydrated = await hydrateEventIds(ranked.map((r: any) => r.id));
+      return hydrated.map((e: any) => ({ ...e, _distanceKm: distanceById.get(e.id) }));
+    }
+
+    if (scope === 'home' && !myLocation) return [];
+    if (scope === 'nearby' && !myLocation) return []; // no GPS, no profile location either
+
+    const rsvpIds = await getUserRsvpEventIds();
+    let query = supabase.from('events').select(EVENT_SELECT);
+    // Public events, the user's own, or ones they've been invited to via RSVP.
+    const visibilityParts = [`is_private.eq.false`, `creator_id.eq.${session.user.id}`];
+    if (rsvpIds.length > 0) visibilityParts.push(`id.in.(${rsvpIds.join(',')})`);
+    query = query.or(visibilityParts.join(','));
+
+    if (searchCategory !== 'All') query = query.eq('category', searchCategory);
+    if (searchLocation.trim()) query = query.ilike('location', `%${searchLocation.trim()}%`);
+    if (after) query = query.gte('event_date', after);
+    if (before) query = query.lt('event_date', before);
+    // Nearby without live GPS falls back to the Home-style text match.
+    if (scope === 'home' || scope === 'nearby') query = query.ilike('location', `%${myLocation}%`);
+
+    const { data, error } = await withRetry(() => query.order('event_date', { ascending: true }).range(from, to));
+    if (error) throw error;
+    return (data || []).map(formatEvent);
+  }
+
   async function fetchEvents() {
     try {
-      if (!refreshing) setLoading(true);
-      
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          *,
-          creator:creator_id ( * ),
-          business:business_id ( * ),
-          rsvps:event_rsvps ( user_id )
-        `)
-        .order('event_date', { ascending: true });
+      if (events.length === 0) setLoading(true);
 
-      if (error) throw error;
-
-      if (data) {
-        const now = new Date();
-        const formatted = data.map(ev => ({
-          ...ev,
-          rsvpCount: ev.rsvps ? ev.rsvps.length : 0,
-          isAttending: ev.rsvps ? ev.rsvps.some((r: any) => r.user_id === session?.user?.id) : false,
-          isPast: new Date(ev.event_date) < now
-        }));
-        setAllEvents(formatted);
+      if (activeTab === 'My RSVPs') {
+        const data = await fetchMyRsvpEvents();
+        setEvents(data);
+        setPage(0);
+        setHasMore(false);
+        return;
       }
+
+      const data = await fetchEventsPage(0);
+      setEvents(data);
+      setPage(0);
+      setHasMore(data.length === PAGE_SIZE);
     } catch (e: any) {
       console.error("Events fetch error:", e.message);
     } finally {
@@ -125,56 +264,21 @@ export default function EventsScreen({ navigation, route }: any) {
     }
   }
 
-  const applyFilters = () => {
-    let result = [...allEvents];
-
-    result = result.filter(e => 
-      !e.is_private || e.creator_id === session?.user?.id || e.isAttending
-    );
-
-    if (scope === 'home') {
-      if (!myLocation) {
-        setFilteredEvents([]);
-        return;
-      }
-      result = result.filter(e => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
-    } else if (scope === 'nearby') {
-      if (deviceCoords) {
-        result = result
-          .filter(e => e.latitude != null && e.longitude != null)
-          .map(e => ({
-            ...e,
-            _distanceKm: getDistanceKm(deviceCoords.latitude, deviceCoords.longitude, e.latitude, e.longitude),
-          }))
-          .sort((a, b) => a._distanceKm - b._distanceKm);
-      } else if (myLocation) {
-        result = result.filter(e => e.location?.toLowerCase().includes(myLocation.toLowerCase()));
-      } else {
-        setFilteredEvents([]);
-        return;
-      }
+  async function loadMoreEvents() {
+    if (loadingMore || !hasMore || loading || activeTab === 'My RSVPs') return;
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      const data = await fetchEventsPage(nextPage);
+      setEvents(prev => [...prev, ...data]);
+      setPage(nextPage);
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (e: any) {
+      console.error("Events load-more error:", e.message);
+    } finally {
+      setLoadingMore(false);
     }
-
-    if (activeTab === 'Upcoming') {
-      result = result.filter(e => !e.isPast);
-    } else if (activeTab === 'My RSVPs') {
-      result = result.filter(e => e.isAttending);
-    } else {
-      result = result.filter(e => e.isPast);
-    }
-
-    if (searchLocation.trim()) {
-      result = result.filter(e => e.location.toLowerCase().includes(searchLocation.toLowerCase()));
-    }
-    if (searchCategory !== 'All') {
-      result = result.filter(e => e.category === searchCategory);
-    }
-    if (searchDate.trim()) {
-      result = result.filter(e => e.event_date.startsWith(searchDate.trim()));
-    }
-
-    setFilteredEvents(result);
-  };
+  }
 
   const clearFilters = () => {
     setSearchLocation('');
@@ -183,7 +287,7 @@ export default function EventsScreen({ navigation, route }: any) {
   };
 
   const toggleRSVP = async (event: any, currentlyAttending: boolean) => {
-    setAllEvents(prev => prev.map(e => {
+    setEvents(prev => prev.map(e => {
       if (e.id === event.id) {
         return {
           ...e,
@@ -202,7 +306,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
       if (error) {
         console.error('RSVP delete error:', error.message);
-        setAllEvents(prev => prev.map(e =>
+        setEvents(prev => prev.map(e =>
           e.id === event.id ? { ...e, isAttending: true, rsvpCount: e.rsvpCount + 1 } : e
         ));
       }
@@ -213,7 +317,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
       if (rsvpError) {
         console.error('RSVP insert error:', rsvpError.message);
-        setAllEvents(prev => prev.map(e =>
+        setEvents(prev => prev.map(e =>
           e.id === event.id ? { ...e, isAttending: false, rsvpCount: e.rsvpCount - 1 } : e
         ));
         return;
@@ -245,7 +349,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
   async function pickImage() {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [16, 9],
       quality: 0.7,
@@ -277,10 +381,11 @@ export default function EventsScreen({ navigation, route }: any) {
       let finalImageUrl = null;
 
       if (imageUri) {
-        const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const compressed = await compressImage(imageUri, { maxDimension: 1600 });
+        const fileExt = 'jpg';
         const fileName = `event-${Date.now()}.${fileExt}`;
         const formData = new FormData();
-        formData.append('file', { uri: imageUri, name: fileName, type: `image/${fileExt}` } as any);
+        formData.append('file', { uri: compressed.uri, name: fileName, type: `image/${fileExt}` } as any);
         const { error: uploadError } = await supabase.storage.from('Listings').upload(fileName, formData);
         if (uploadError) throw uploadError;
         const { data: { publicUrl } } = supabase.storage.from('Listings').getPublicUrl(fileName);
@@ -353,7 +458,7 @@ export default function EventsScreen({ navigation, route }: any) {
             <Image source={{ uri: item.image_url }} style={styles.eventBanner} />
           ) : (
             <View style={[styles.eventBanner, styles.placeholderBanner]}>
-              <Ionicons name="calendar" size={40} color="#94A3B8" />
+              <Ionicons name="calendar" size={40} color={colors.textTertiary} />
             </View>
           )}
         </TouchableOpacity>
@@ -368,7 +473,7 @@ export default function EventsScreen({ navigation, route }: any) {
             <Text style={styles.categoryBadgeText}>{item.category}</Text>
             {item.is_private && (
               <View style={styles.privateBadge}>
-                <Ionicons name="lock-closed" size={10} color="#64748B" />
+                <Ionicons name="lock-closed" size={10} color={colors.textSecondary} />
                 <Text style={styles.privateBadgeText}>Private</Text>
               </View>
             )}
@@ -383,7 +488,7 @@ export default function EventsScreen({ navigation, route }: any) {
             {displayAvatar ? (
               <Image source={{ uri: displayAvatar }} style={styles.hostAvatar} />
             ) : (
-              <Ionicons name={item.business ? "briefcase" : "person-circle"} size={20} color="#CBD5E1" style={{ marginRight: 6 }} />
+              <Ionicons name={item.business ? "briefcase" : "person-circle"} size={20} color={colors.borderStrong} style={{ marginRight: 6 }} />
             )}
             <Text style={styles.hostName}>Hosted by {displayName}</Text>
           </TouchableOpacity>
@@ -393,12 +498,12 @@ export default function EventsScreen({ navigation, route }: any) {
           </TouchableOpacity>
           
           <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={16} color="#64748B" />
+            <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
             <Text style={styles.infoText}>{day} @ {time}</Text>
           </View>
           
           <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#64748B" />
+            <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
             <Text style={styles.infoText}>{item.location}</Text>
             {item._distanceKm != null && (
               <Text style={styles.distanceBadge}>· {formatDistance(item._distanceKm)}</Text>
@@ -409,14 +514,14 @@ export default function EventsScreen({ navigation, route }: any) {
 
           <View style={styles.actionRow}>
             <View style={styles.attendeesContainer}>
-              <Ionicons name="people" size={18} color="#3B82F6" />
+              <Ionicons name="people" size={18} color={colors.accent} />
               <Text style={styles.attendeesText}>{item.rsvpCount} Attending</Text>
             </View>
             
             <View style={{ flexDirection: 'row' }}>
               {item.is_private && (
                 <TouchableOpacity style={styles.inviteButton} onPress={() => handleShareInvite(item)}>
-                  <Ionicons name="share-social" size={18} color="#64748B" />
+                  <Ionicons name="share-social" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
               
@@ -441,10 +546,10 @@ export default function EventsScreen({ navigation, route }: any) {
         <Text style={styles.navTitle}>Community Events</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => setShowFilters(!showFilters)} style={[styles.navIconButton, { marginRight: 10 }]}>
-            <Ionicons name={showFilters ? "funnel" : "funnel-outline"} size={24} color="#34C759" />
+            <Ionicons name={showFilters ? "funnel" : "funnel-outline"} size={24} color={colors.brand} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.navIconButton}>
-            <Ionicons name="add-circle" size={28} color="#34C759" />
+            <Ionicons name="add-circle" size={28} color={colors.brand} />
           </TouchableOpacity>
         </View>
       </View>
@@ -465,12 +570,12 @@ export default function EventsScreen({ navigation, route }: any) {
         <View style={styles.filterTrayContainer}>
           <View style={styles.filterInputsRow}>
             <View style={[styles.searchBoxWrapper, { marginRight: 8 }]}>
-              <Ionicons name="location-outline" size={16} color="#94A3B8" style={styles.searchIcon} />
-              <TextInput style={styles.traySearchInput} placeholder="Filter Location..." value={searchLocation} onChangeText={setSearchLocation} placeholderTextColor="#94A3B8" />
+              <Ionicons name="location-outline" size={16} color={colors.textTertiary} style={styles.searchIcon} />
+              <TextInput style={styles.traySearchInput} placeholder="Filter Location..." value={searchLocation} onChangeText={setSearchLocation} placeholderTextColor={colors.textTertiary} />
             </View>
             <View style={styles.searchBoxWrapper}>
-              <Ionicons name="calendar-outline" size={16} color="#94A3B8" style={styles.searchIcon} />
-              <TextInput style={styles.traySearchInput} placeholder="YYYY-MM-DD" value={searchDate} onChangeText={setSearchDate} placeholderTextColor="#94A3B8" />
+              <Ionicons name="calendar-outline" size={16} color={colors.textTertiary} style={styles.searchIcon} />
+              <TextInput style={styles.traySearchInput} placeholder="YYYY-MM-DD" value={searchDate} onChangeText={setSearchDate} placeholderTextColor={colors.textTertiary} />
             </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10 }}>
@@ -497,20 +602,23 @@ export default function EventsScreen({ navigation, route }: any) {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
-          data={filteredEvents}
+          data={events}
           keyExtractor={(item) => item.id}
           renderItem={renderEventCard}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           onRefresh={() => { setRefreshing(true); fetchEvents(); }}
           refreshing={refreshing}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreEvents}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <View style={styles.emptyLayout}>
-                <Ionicons name="location-outline" size={60} color="#CBD5E1" />
+                <Ionicons name="location-outline" size={60} color={colors.borderStrong} />
                 <Text style={styles.emptyText}>Set your location on your profile to see events at home.</Text>
                 <TouchableOpacity style={styles.setLocationButton} onPress={() => navigation.navigate('Profile', { session })}>
                   <Text style={styles.setLocationButtonText}>Go to Profile</Text>
@@ -518,12 +626,12 @@ export default function EventsScreen({ navigation, route }: any) {
               </View>
             ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
               <View style={styles.emptyLayout}>
-                <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
+                <Ionicons name="navigate-outline" size={60} color={colors.borderStrong} />
                 <Text style={styles.emptyText}>Enable location access, or set your profile location, to see nearby events.</Text>
               </View>
             ) : (
               <View style={styles.emptyLayout}>
-                <Ionicons name="calendar-clear-outline" size={60} color="#CBD5E1" />
+                <Ionicons name="calendar-clear-outline" size={60} color={colors.borderStrong} />
                 <Text style={styles.emptyText}>
                   {scope === 'home' ? `No events found at home in ${myLocation}.` : scope === 'nearby' ? 'No events found nearby.' : 'No events match your criteria.'}
                 </Text>
@@ -545,7 +653,7 @@ export default function EventsScreen({ navigation, route }: any) {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Host an Event</Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
-                  <Ionicons name="close-circle" size={28} color="#64748B" />
+                  <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
@@ -561,7 +669,7 @@ export default function EventsScreen({ navigation, route }: any) {
                           style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
                           onPress={() => setPostingAsBusinessId(null)}
                         >
-                          <Ionicons name="person-circle" size={24} color={postingAsBusinessId === null ? "#34C759" : "#64748B"} />
+                          <Ionicons name="person-circle" size={24} color={postingAsBusinessId === null ? colors.brand : colors.textSecondary} />
                           <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>My Profile</Text>
                         </TouchableOpacity>
                         {ownedBusinesses.map((biz) => (
@@ -573,7 +681,7 @@ export default function EventsScreen({ navigation, route }: any) {
                             {biz.logo_url ? (
                               <Image source={{ uri: biz.logo_url }} style={{ width: 24, height: 24, borderRadius: 12 }} />
                             ) : (
-                              <Ionicons name="briefcase" size={24} color={postingAsBusinessId === biz.id ? "#34C759" : "#64748B"} />
+                              <Ionicons name="briefcase" size={24} color={postingAsBusinessId === biz.id ? colors.brand : colors.textSecondary} />
                             )}
                             <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>
                               {biz.name}
@@ -590,7 +698,7 @@ export default function EventsScreen({ navigation, route }: any) {
                     <Image source={{ uri: imageUri }} style={styles.selectedImage} />
                   ) : (
                     <>
-                      <Ionicons name="camera" size={32} color="#94A3B8" />
+                      <Ionicons name="camera" size={32} color={colors.textTertiary} />
                       <Text style={styles.imagePlaceholderText}>Add Event Banner</Text>
                     </>
                   )}
@@ -616,8 +724,8 @@ export default function EventsScreen({ navigation, route }: any) {
                   <Switch 
                     value={isPrivate} 
                     onValueChange={setIsPrivate} 
-                    trackColor={{ false: '#E2E8F0', true: '#34C759' }}
-                    thumbColor="#fff"
+                    trackColor={{ false: colors.border, true: colors.brand }}
+                    thumbColor={colors.white}
                   />
                 </View>
 
@@ -636,7 +744,7 @@ export default function EventsScreen({ navigation, route }: any) {
                       }
                     }}
                   >
-                    {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={20} color="#34C759" />}
+                    {capturingLocation ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={20} color={colors.brand} />}
                   </TouchableOpacity>
                 </View>
 
@@ -646,14 +754,14 @@ export default function EventsScreen({ navigation, route }: any) {
                 <Text style={styles.inputLabel}>Event Date & Time</Text>
                 <View style={styles.halfInputRow}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Date</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Date</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                         <DateTimePicker value={eventDate} mode="date" display="default" onChange={(e, d) => d && setEventDate(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowDatePicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatDate(eventDate)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatDate(eventDate)}</Text>
                       </TouchableOpacity>
                     )}
                     {showDatePicker && Platform.OS === 'android' && (
@@ -662,14 +770,14 @@ export default function EventsScreen({ navigation, route }: any) {
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Start Time</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Start Time</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                         <DateTimePicker value={eventTime} mode="time" display="default" onChange={(e, d) => d && setEventTime(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowTimePicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatTime(eventTime)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatTime(eventTime)}</Text>
                       </TouchableOpacity>
                     )}
                     {showTimePicker && Platform.OS === 'android' && (
@@ -679,7 +787,7 @@ export default function EventsScreen({ navigation, route }: any) {
                 </View>
 
                 <TouchableOpacity style={styles.publishButton} onPress={handleCreateEvent} disabled={uploading}>
-                  {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Publish Event</Text>}
+                  {uploading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishButtonText}>Publish Event</Text>}
                 </TouchableOpacity>
                 <View style={{ height: 40 }} />
                 
@@ -693,121 +801,121 @@ export default function EventsScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   navPanel: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 20, paddingBottom: 15,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0'
+    backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border
   },
-  navTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  navTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   navIconButton: { padding: 4 },
-  filterTrayContainer: { backgroundColor: '#fff', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  filterTrayContainer: { backgroundColor: colors.white, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   filterInputsRow: { flexDirection: 'row', marginBottom: 4 },
-  searchBoxWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 10, paddingHorizontal: 12 },
+  searchBoxWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], borderRadius: 10, paddingHorizontal: 12 },
   searchIcon: { marginRight: 6 },
-  traySearchInput: { flex: 1, height: 40, fontSize: 13, color: '#1E293B', fontWeight: '500' },
-  filterCategoryPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: '#F1F5F9', marginRight: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  filterCategoryPillActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  filterCategoryText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
-  filterCategoryTextActive: { color: '#fff' },
+  traySearchInput: { flex: 1, height: 40, fontSize: 13, color: colors.textPrimary, fontFamily: fontFamily.medium },
+  filterCategoryPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.slate[100], marginRight: 8, borderWidth: 1, borderColor: colors.border },
+  filterCategoryPillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  filterCategoryText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  filterCategoryTextActive: { color: colors.white },
   clearFilterLink: { alignSelf: 'center', marginTop: 6, padding: 4 },
-  clearFilterLinkText: { fontSize: 12, color: '#EF4444', fontWeight: '700' },
+  clearFilterLinkText: { fontSize: 12, color: colors.danger, fontFamily: fontFamily.bold },
   tabContainer: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  tabButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F1F5F9', marginRight: 10 },
-  tabButtonActive: { backgroundColor: '#1E293B' },
-  tabText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  tabTextActive: { color: '#fff' },
+  tabButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: colors.slate[100], marginRight: 10 },
+  tabButtonActive: { backgroundColor: colors.textPrimary },
+  tabText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  tabTextActive: { color: colors.white },
   eventCard: {
-    backgroundColor: '#fff', borderRadius: 16, marginBottom: 20, overflow: 'hidden',
+    backgroundColor: colors.white, borderRadius: 16, marginBottom: 20, overflow: 'hidden',
     elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8
   },
   eventBanner: { width: '100%', height: 160, resizeMode: 'cover' },
-  placeholderBanner: { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  placeholderBanner: { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   dateBadge: {
-    position: 'absolute', top: 12, right: 12, backgroundColor: '#fff',
+    position: 'absolute', top: 12, right: 12, backgroundColor: colors.white,
     borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center',
     shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3
   },
-  dateBadgeMonth: { fontSize: 11, fontWeight: '800', color: '#EF4444' },
-  dateBadgeDay: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
+  dateBadgeMonth: { fontSize: 11, fontFamily: fontFamily.extrabold, color: colors.danger },
+  dateBadgeDay: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   eventBody: { padding: 16 },
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  categoryBadgeText: { fontSize: 11, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase' },
-  privateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  privateBadgeText: { fontSize: 10, fontWeight: '700', color: '#64748B', marginLeft: 4 },
+  categoryBadgeText: { fontSize: 11, fontFamily: fontFamily.extrabold, color: colors.accent, textTransform: 'uppercase' },
+  privateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  privateBadgeText: { fontSize: 10, fontFamily: fontFamily.bold, color: colors.textSecondary, marginLeft: 4 },
   hostRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   hostAvatar: { width: 20, height: 20, borderRadius: 10, marginRight: 6 },
-  hostName: { fontSize: 13, fontWeight: '600', color: '#64748B' },
-  eventTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 12 },
+  hostName: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary },
+  eventTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 12 },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  infoText: { fontSize: 14, fontWeight: '600', color: '#475569', marginLeft: 8 },
-  eventDescription: { fontSize: 14, color: '#64748B', marginTop: 12, lineHeight: 20 },
+  infoText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600], marginLeft: 8 },
+  eventDescription: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textSecondary, marginTop: 12, lineHeight: 20 },
   actionRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9'
+    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.slate[100]
   },
   attendeesContainer: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12
+    backgroundColor: colors.accentSubtle, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12
   },
-  attendeesText: { fontSize: 13, fontWeight: '700', color: '#3B82F6', marginLeft: 6 },
+  attendeesText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.accent, marginLeft: 6 },
   inviteButton: {
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: '#F8FAFC', paddingHorizontal: 14,
-    borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, paddingHorizontal: 14,
+    borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: colors.border
   },
-  rsvpButton: { backgroundColor: '#F1F5F9', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 },
-  rsvpButtonActive: { backgroundColor: '#34C759' },
-  rsvpText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
-  rsvpTextActive: { color: '#fff' },
+  rsvpButton: { backgroundColor: colors.slate[100], paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 },
+  rsvpButtonActive: { backgroundColor: colors.brand },
+  rsvpText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  rsvpTextActive: { color: colors.white },
   emptyLayout: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
-  setLocationButton: { backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
-  setLocationButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
+  emptyText: { color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
+  setLocationButton: { backgroundColor: colors.brand, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
+  setLocationButtonText: { color: colors.white, fontSize: 14, fontFamily: fontFamily.bold },
+  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.brandSubtle, borderWidth: 1, borderColor: colors.brandSubtleStrong, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  distanceBadge: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 4 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
-    backgroundColor: '#fff', borderTopLeftRadius: 28,
+    backgroundColor: colors.white, borderTopLeftRadius: 28,
     borderTopRightRadius: 28, padding: 24, maxHeight: '90%'
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   imageSelector: {
-    width: '100%', height: 140, backgroundColor: '#F8FAFC', borderRadius: 16,
-    borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1',
+    width: '100%', height: 140, backgroundColor: colors.backgroundMuted, borderRadius: 16,
+    borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong,
     justifyContent: 'center', alignItems: 'center', marginBottom: 20, overflow: 'hidden'
   },
   selectedImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imagePlaceholderText: { fontSize: 13, fontWeight: '600', color: '#94A3B8', marginTop: 8 },
+  imagePlaceholderText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textTertiary, marginTop: 8 },
   privacyToggleRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12,
-    marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, padding: 16, borderRadius: 12,
+    marginBottom: 16, borderWidth: 1, borderColor: colors.border
   },
-  privacyToggleTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  privacyToggleSubtitle: { fontSize: 12, color: '#64748B', marginTop: 4 },
+  privacyToggleTitle: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  privacyToggleSubtitle: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   halfInputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  inputLabel: { fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 },
+  inputLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 },
   inputField: {
-    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border,
     borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 15, color: '#1E293B', marginBottom: 16
+    fontFamily: fontFamily.regular, fontSize: 15, color: colors.textPrimary, marginBottom: 16
   },
-  creationPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#F1F5F9', marginRight: 8, marginBottom: 4 },
-  creationPillActive: { backgroundColor: '#3B82F6' },
-  creationPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  creationPillTextActive: { color: '#fff' },
-  publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
-  publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  creationPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.slate[100], marginRight: 8, marginBottom: 4 },
+  creationPillActive: { backgroundColor: colors.accent },
+  creationPillText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  creationPillTextActive: { color: colors.white },
+  publishButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
+  publishButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
   identityPill: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 8, paddingHorizontal: 16,
-    backgroundColor: '#F8FAFC', borderRadius: 20,
-    marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, borderRadius: 20,
+    marginRight: 10, borderWidth: 1, borderColor: colors.border
   },
-  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
-  identityText: { fontSize: 14, fontWeight: '600', color: '#64748B', marginLeft: 8 },
-  identityTextActive: { color: '#34C759' }
+  identityPillActive: { backgroundColor: colors.brandSubtle, borderColor: colors.brand },
+  identityText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 8 },
+  identityTextActive: { color: colors.brand }
 });

@@ -5,7 +5,9 @@ import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from './AppHeader';
+import { withRetry } from '../../lib/network';
 
+import { colors, fontFamily } from '../../theme';
 function normalizeEvent(events: any) {
   if (!events) return null;
   return Array.isArray(events) ? events[0] : events;
@@ -29,25 +31,40 @@ export default function DashboardScreen({ navigation, route }: any) {
 
     async function fetchDashboardEvent() {
       try {
-        const { data: rsvpData } = await supabase
+        const nowIso = new Date().toISOString();
+
+        // 1. Nearest UPCOMING event the user RSVP'd to — !inner so the
+        // event_date filter/order below actually apply to the joined table,
+        // not just the rsvp row itself. Previously this had no date filter
+        // and no ordering, so .limit(1) could return any RSVP at random —
+        // including ones for events that already happened.
+        const { data: rsvpData } = await withRetry(() => supabase
           .from('event_rsvps')
-          .select('event_id, events(*)')
+          .select('event_id, events!inner(*)')
           .eq('user_id', session.user.id)
-          .limit(1);
+          .gte('events.event_date', nowIso)
+          .order('event_date', { foreignTable: 'events', ascending: true })
+          .limit(1));
 
         if (rsvpData?.length && rsvpData[0].events) {
           setFeaturedEvent(normalizeEvent(rsvpData[0].events));
           return;
         }
 
-        const { data: publicData } = await supabase
+        // 2. Fallback: nearest upcoming public event (same missing-filter bug existed here too)
+        const { data: publicData } = await withRetry(() => supabase
           .from('events')
           .select('*')
           .eq('is_private', false)
+          .gte('event_date', nowIso)
           .order('event_date', { ascending: true })
-          .limit(1);
+          .limit(1));
 
-        if (publicData?.length) setFeaturedEvent(normalizeEvent(publicData[0]));
+        if (publicData?.length) {
+          setFeaturedEvent(normalizeEvent(publicData[0]));
+        } else {
+          setFeaturedEvent(null);
+        }
       } catch (e: any) {
         console.error("Dashboard event fetch error:", e.message);
       }
@@ -113,7 +130,7 @@ export default function DashboardScreen({ navigation, route }: any) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#34C759']} tintColor="#34C759" />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.brand]} tintColor={colors.brand} />
         }
       >
         <View style={styles.headerBlock}>
@@ -139,7 +156,7 @@ export default function DashboardScreen({ navigation, route }: any) {
             <Text style={styles.cardTitle}>{featuredEvent?.title || 'Browse what\'s happening nearby'}</Text>
             <View style={styles.cardActionRow}>
               <Text style={styles.actionText}>{featuredEvent ? 'View Event Details' : 'Explore Events'}</Text>
-              <Ionicons name="arrow-forward" size={16} color="#34C759" />
+              <Ionicons name="arrow-forward" size={16} color={colors.brand} />
             </View>
           </View>
         </TouchableOpacity>
@@ -150,7 +167,7 @@ export default function DashboardScreen({ navigation, route }: any) {
             
             <View style={styles.forumHeaderRow}>
               <View style={styles.forumHeaderLeft}>
-                <Ionicons name="chatbubbles" size={24} color="#3B82F6" />
+                <Ionicons name="chatbubbles" size={24} color={colors.accent} />
                 <Text style={styles.forumMainTitle}>Your Active Forums</Text>
               </View>
               {unreadForumCount > 0 && (
@@ -163,7 +180,7 @@ export default function DashboardScreen({ navigation, route }: any) {
             <Text style={styles.cardSubtitle}>New activity in your tracked communities.</Text>
 
             {loadingForums ? (
-              <ActivityIndicator color="#3B82F6" style={{ alignSelf: 'flex-start', marginTop: 12 }} />
+              <ActivityIndicator color={colors.accent} style={{ alignSelf: 'flex-start', marginTop: 12 }} />
             ) : followedTopics.length > 0 ? (
               <View style={styles.tagsContainer}>
                 {followedTopics.map((topic, index) => (
@@ -178,7 +195,7 @@ export default function DashboardScreen({ navigation, route }: any) {
 
             <View style={styles.cardActionRow}>
               <Text style={styles.actionText}>Jump to Forums</Text>
-              <Ionicons name="arrow-forward" size={16} color="#34C759" />
+              <Ionicons name="arrow-forward" size={16} color={colors.brand} />
             </View>
           </View>
         </TouchableOpacity>
@@ -195,7 +212,7 @@ export default function DashboardScreen({ navigation, route }: any) {
             <Text style={styles.cardSubtitle}>Manage your billing details, active subscriptions, and profile settings.</Text>
             <View style={styles.cardActionRow}>
               <Text style={styles.actionText}>Manage Account</Text>
-              <Ionicons name="arrow-forward" size={16} color="#34C759" />
+              <Ionicons name="arrow-forward" size={16} color={colors.brand} />
             </View>
           </View>
         </TouchableOpacity>
@@ -210,7 +227,7 @@ export default function DashboardScreen({ navigation, route }: any) {
           activeOpacity={0.85}
           onPress={() => navigation.navigate('Main', { session })}
         >
-          <Ionicons name="close" size={28} color="#fff" />
+          <Ionicons name="close" size={28} color={colors.white} />
         </TouchableOpacity>
       </View>
     </View>
@@ -218,7 +235,7 @@ export default function DashboardScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   exitButtonContainer: {
     position: 'absolute',
     left: 0,
@@ -229,38 +246,38 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#34C759',
+    backgroundColor: colors.brand,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 6,
-    shadowColor: '#34C759',
+    shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
   },
   scrollContent: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 20 },
   headerBlock: { marginBottom: 20, paddingHorizontal: 4 },
-  greetingText: { fontSize: 26, fontWeight: '800', color: '#1E293B', marginBottom: 4 },
-  subtitleText: { fontSize: 16, color: '#64748B', fontWeight: '500' },
-  dashboardCard: { backgroundColor: '#fff', borderRadius: 24, marginBottom: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
-  cardImageContainer: { height: 140, width: '100%', backgroundColor: '#E2E8F0' },
+  greetingText: { fontSize: 26, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 4 },
+  subtitleText: { fontSize: 16, color: colors.textSecondary, fontFamily: fontFamily.medium },
+  dashboardCard: { backgroundColor: colors.white, borderRadius: 24, marginBottom: 20, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  cardImageContainer: { height: 140, width: '100%', backgroundColor: colors.border },
   cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  dateOverlay: { position: 'absolute', top: 12, right: 12, backgroundColor: '#fff', borderRadius: 12, padding: 8, alignItems: 'center' },
-  dateMonth: { fontSize: 10, fontWeight: '800', color: '#EF4444' },
-  dateDay: { fontSize: 16, fontWeight: '900', color: '#1E293B' },
+  dateOverlay: { position: 'absolute', top: 12, right: 12, backgroundColor: colors.white, borderRadius: 12, padding: 8, alignItems: 'center' },
+  dateMonth: { fontSize: 10, fontFamily: fontFamily.extrabold, color: colors.danger },
+  dateDay: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   cardBody: { padding: 16 },
-  cardCategory: { fontSize: 11, fontWeight: '700', color: '#34C759', textTransform: 'uppercase' },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginTop: 4 },
-  cardSubtitle: { fontSize: 14, color: '#64748B', marginTop: 4, marginBottom: 4, lineHeight: 20 },
+  cardCategory: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.brand, textTransform: 'uppercase' },
+  cardTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginTop: 4 },
+  cardSubtitle: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textSecondary, marginTop: 4, marginBottom: 4, lineHeight: 20 },
   cardActionRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
-  actionText: { fontSize: 14, fontWeight: '700', color: '#34C759', marginRight: 4 },
+  actionText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.brand, marginRight: 4 },
   forumHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   forumHeaderLeft: { flexDirection: 'row', alignItems: 'center' },
-  forumMainTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginLeft: 8 },
-  badgeContainer: { backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  forumMainTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginLeft: 8 },
+  badgeContainer: { backgroundColor: colors.danger, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  badgeText: { color: colors.white, fontSize: 10, fontFamily: fontFamily.extrabold },
   tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
   forumTag: { backgroundColor: '#E0F2FE', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#BAE6FD' },
-  forumTagText: { fontSize: 12, fontWeight: '700', color: '#0369A1' },
-  emptyForumsText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', marginTop: 8, lineHeight: 18 },
+  forumTagText: { fontSize: 12, fontFamily: fontFamily.bold, color: '#0369A1' },
+  emptyForumsText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textTertiary, fontStyle: 'italic', marginTop: 8, lineHeight: 18 },
 });

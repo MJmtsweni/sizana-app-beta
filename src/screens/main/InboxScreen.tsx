@@ -6,7 +6,9 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { withRetry } from '../../lib/network';
 
+import { colors, fontFamily } from '../../theme';
 export default function InboxScreen({ route, navigation, session: directSession }: any) {
   const session = route?.params?.session || directSession || route?.params?.params?.session;
   const rawParams = route?.params?.params || route?.params;
@@ -91,8 +93,10 @@ export default function InboxScreen({ route, navigation, session: directSession 
           setActiveContextItem(incomingChat.contextItem);
         }
 
-        // Pre-fill only for new marketplace listing inquiries
-        if (isMarketplace && incomingChat.contextItem) {
+        // Pre-fill only when this is a fresh buyer-initiated inquiry (from
+        // ListingDetailsModal) — not when a seller is reopening an existing
+        // thread from a notification, where this text would be nonsensical.
+        if (isMarketplace && incomingChat.contextItem && incomingChat.isNewInquiry) {
           setNewMessage(`Hi ${incomingChat.sellerName}, is "${incomingChat.contextItem.title}" still available?`);
         }
 
@@ -191,7 +195,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
       setLoading(true);
       if (!session?.user?.id) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await withRetry(() => supabase
         .from('messages')
         .select(`
           id, content, created_at, sender_id, receiver_id, is_read, item_id, business_id,
@@ -199,7 +203,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
           receiver:receiver_id ( id, username, avatar_url )
         `)
         .or(`sender_id.eq.${session.user.id},receiver_id.eq.${session.user.id}`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
 
       if (error) throw error;
       if (!data) return;
@@ -348,13 +352,25 @@ export default function InboxScreen({ route, navigation, session: directSession 
 
       setMessages((prev) => prev.map(m => m.id === tempId ? data : m));
 
-      const { error: notifError } = await supabase.from('notifications').insert({
+      // Distinguish where the message came from so the notification center
+      // (and push copy) doesn't label every DM a "business inquiry" — only
+      // messages sent from a business page or a marketplace listing are.
+      const notifType =
+        activeBusinessId && activeBusinessId !== 'undefined' ? 'business_inquiry' :
+        activeItemId && activeItemId !== 'undefined' ? 'market_inquiry' :
+        'message';
+
+      const notifPayload: any = {
         actor_id: session.user.id,
         receiver_id: activeChatPartner,
-        type: 'message',
-        target_id: session.user.id, 
+        type: notifType,
+        target_id: session.user.id,
         is_read: false,
-      });
+      };
+      if (notifType === 'business_inquiry') notifPayload.business_id = activeBusinessId;
+      if (notifType === 'market_inquiry') notifPayload.item_id = activeItemId;
+
+      const { error: notifError } = await supabase.from('notifications').insert(notifPayload);
       if (notifError) console.error('Message notification error:', notifError.message);
       
     } catch (error: any) {
@@ -570,7 +586,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
         ) : item.partnerAvatar ? (
           <Image source={{ uri: item.partnerAvatar }} style={styles.avatarImg} />
         ) : (
-          <Ionicons name="person-circle" size={48} color="#CBD5E1" />
+          <Ionicons name="person-circle" size={48} color={colors.borderStrong} />
         )}
       </View>
 
@@ -593,7 +609,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
             <Ionicons
               name={item.threadLabel.startsWith('Business') ? 'briefcase-outline' : 'pricetag-outline'}
               size={10}
-              color={item.threadLabel.startsWith('Business') ? '#3B82F6' : '#F59E0B'}
+              color={item.threadLabel.startsWith('Business') ? colors.accent : colors.warning}
             />
             <Text style={[
               styles.bizTagText,
@@ -620,7 +636,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
           <Text style={styles.unreadBadgeText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text>
         </View>
       ) : (
-        <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+        <Ionicons name="chevron-forward" size={18} color={colors.borderStrong} />
       )}
     </TouchableOpacity>
   );
@@ -646,7 +662,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
     <Ionicons
       name={isTemp ? "time-outline" : item.is_read ? "checkmark-done" : "checkmark"}
       size={14}
-      color={item.is_read ? "#6EE7B7" : "#E2E8F0"}
+      color={item.is_read ? "#6EE7B7" : colors.border}
       style={{ marginLeft: 2 }} 
     />
   )}
@@ -683,7 +699,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
       >
         <View style={styles.chatHeader}>
           <TouchableOpacity onPress={handleBackToList} style={styles.headerBackButton}>
-            <Ionicons name="arrow-back" size={22} color="#1E293B" />
+            <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
 
           <View style={styles.chatHeaderCenter}>
@@ -691,7 +707,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
               {activeChatAvatar ? (
                 <Image source={{ uri: activeChatAvatar }} style={styles.chatHeaderAvatar} />
               ) : (
-                <Ionicons name="person-circle" size={36} color="#CBD5E1" />
+                <Ionicons name="person-circle" size={36} color={colors.borderStrong} />
               )}
             </View>
             <View style={{ flex: 1 }}>
@@ -716,7 +732,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
               }
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="trash-outline" size={20} color="#EF4444" />
+              <Ionicons name="trash-outline" size={20} color={colors.danger} />
             </TouchableOpacity>
           </View>
         </View>
@@ -731,7 +747,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
               <Image source={{ uri: activeContextItem.image_url }} style={styles.contextImage} />
             ) : (
               <View style={styles.contextPlaceholder}>
-                <Ionicons name="pricetag" size={20} color="#94A3B8" />
+                <Ionicons name="pricetag" size={20} color={colors.textTertiary} />
               </View>
             )}
             <View style={styles.contextDetails}>
@@ -743,7 +759,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
 
         {loading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color="#34C759" />
+            <ActivityIndicator size="large" color={colors.brand} />
           </View>
         ) : (
           <FlatList
@@ -756,7 +772,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               <View style={styles.emptyChat}>
-                <Ionicons name="chatbubbles-outline" size={48} color="#CBD5E1" />
+                <Ionicons name="chatbubbles-outline" size={48} color={colors.borderStrong} />
                 <Text style={styles.emptyChatText}>Start the conversation!</Text>
               </View>
             }
@@ -767,7 +783,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
           <TextInput
             style={styles.chatInputField}
             placeholder="Type a message..."
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={colors.textTertiary}
             value={newMessage}
             onChangeText={setNewMessage}
             multiline
@@ -778,7 +794,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
             onPress={handleSendMessage}
             disabled={!newMessage.trim()}
           >
-            <Ionicons name="send" size={18} color="#fff" />
+            <Ionicons name="send" size={18} color={colors.white} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -798,7 +814,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
               onPress={() => navigation.goBack()} 
               style={{ marginRight: 12, padding: 4 }}
             >
-              <Ionicons name="arrow-back" size={26} color="#1E293B" />
+              <Ionicons name="arrow-back" size={26} color={colors.textPrimary} />
             </TouchableOpacity>
           )}
           <Text style={styles.mainInboxTitle}>Inbox</Text>
@@ -813,7 +829,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#34C759" />
+          <ActivityIndicator size="large" color={colors.brand} />
         </View>
       ) : (
         <FlatList
@@ -826,7 +842,7 @@ export default function InboxScreen({ route, navigation, session: directSession 
           refreshing={loading}
           ListEmptyComponent={
             <View style={styles.emptyInboxLayout}>
-              <Ionicons name="mail-outline" size={60} color="#CBD5E1" />
+              <Ionicons name="mail-outline" size={60} color={colors.borderStrong} />
               <Text style={styles.emptyInboxText}>No messages yet.</Text>
               <Text style={styles.emptyInboxSubText}>
                 Messages from traders and businesses will appear here.
@@ -840,27 +856,27 @@ export default function InboxScreen({ route, navigation, session: directSession 
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
-  chatWindow: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
+  chatWindow: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   inboxTitleBlock: {
     paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 60 : 45,
-    paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
-    backgroundColor: '#fff',
+    paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border,
+    backgroundColor: colors.white,
   },
-  mainInboxTitle: { fontSize: 26, fontWeight: '800', color: '#1E293B' },
-  inboxSubtitle: { fontSize: 13, color: '#94A3B8', fontWeight: '500', marginTop: 2 },
+  mainInboxTitle: { fontSize: 26, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  inboxSubtitle: { fontSize: 13, color: colors.textTertiary, fontFamily: fontFamily.medium, marginTop: 2 },
   convoCard: {
-    flexDirection: 'row', backgroundColor: '#fff', padding: 14,
+    flexDirection: 'row', backgroundColor: colors.white, padding: 14,
     borderRadius: 16, alignItems: 'center', marginBottom: 10,
-    borderWidth: 1, borderColor: '#E2E8F0',
+    borderWidth: 1, borderColor: colors.border,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
   },
-  convoCardUnread: { backgroundColor: '#F0FDF4', borderColor: '#DCFCE7' },
+  convoCardUnread: { backgroundColor: colors.brandSubtle, borderColor: colors.brandSubtleStrong },
   avatarFrame: {
     width: 52, height: 52, borderRadius: 16,
-    backgroundColor: '#F1F5F9', overflow: 'hidden',
+    backgroundColor: colors.slate[100], overflow: 'hidden',
     justifyContent: 'center', alignItems: 'center', marginRight: 12,
   },
   avatarImg: { width: '100%', height: '100%' },
@@ -869,70 +885,70 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 2,
   },
-  partnerNameText: { fontSize: 15, fontWeight: '700', color: '#1E293B', flex: 1, marginRight: 8 },
-  timestampSmall: { fontSize: 11, color: '#94A3B8', fontWeight: '500' },
+  partnerNameText: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary, flex: 1, marginRight: 8 },
+  timestampSmall: { fontSize: 11, color: colors.textTertiary, fontFamily: fontFamily.medium },
   bizTag: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2,
+    backgroundColor: colors.accentSubtle, paddingHorizontal: 6, paddingVertical: 2,
     borderRadius: 6, alignSelf: 'flex-start', marginBottom: 4,
   },
-  bizTagText: { fontSize: 10, fontWeight: '700', color: '#3B82F6', marginLeft: 4 },
-  bizTagMarketplace: { backgroundColor: '#FFFBEB' },
-  bizTagTextMarketplace: { color: '#F59E0B' },
+  bizTagText: { fontSize: 10, fontFamily: fontFamily.bold, color: colors.accent, marginLeft: 4 },
+  bizTagMarketplace: { backgroundColor: colors.warningSubtle },
+  bizTagTextMarketplace: { color: colors.warning },
   previewRow: { flexDirection: 'row', alignItems: 'center' },
-  youLabel: { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  lastMessageText: { fontSize: 13, color: '#64748B', fontWeight: '500', flex: 1 },
-  textBolded: { fontWeight: '800', color: '#065F46' },
-  textDarkened: { color: '#047857', fontWeight: '700' },
+  youLabel: { fontSize: 13, color: colors.textSecondary, fontFamily: fontFamily.semibold },
+  lastMessageText: { fontSize: 13, color: colors.textSecondary, fontFamily: fontFamily.medium, flex: 1 },
+  textBolded: { fontFamily: fontFamily.extrabold, color: colors.brandPressed },
+  textDarkened: { color: colors.brand, fontFamily: fontFamily.bold },
   unreadCounterBadge: {
-    backgroundColor: '#34C759', minWidth: 22, height: 22,
+    backgroundColor: colors.brand, minWidth: 22, height: 22,
     borderRadius: 11, justifyContent: 'center', alignItems: 'center',
     paddingHorizontal: 6, marginLeft: 8,
   },
-  unreadBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  unreadBadgeText: { color: colors.white, fontSize: 11, fontFamily: fontFamily.extrabold },
   emptyInboxLayout: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
-  emptyInboxText: { color: '#334155', fontSize: 16, fontWeight: '700', marginTop: 16 },
+  emptyInboxText: { color: colors.slate[700], fontSize: 16, fontFamily: fontFamily.bold, marginTop: 16 },
   emptyInboxSubText: {
-    color: '#94A3B8', fontSize: 13, fontWeight: '500', marginTop: 6, textAlign: 'center',
+    color: colors.textTertiary, fontSize: 13, fontFamily: fontFamily.medium, marginTop: 6, textAlign: 'center',
   },
   chatHeader: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 14, paddingBottom: 12,
     paddingTop: Platform.OS === 'ios' ? 60 : 45,
-    borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#fff',
+    borderBottomWidth: 1, borderBottomColor: colors.slate[100], backgroundColor: colors.white,
   },
   headerBackButton: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center',
     marginRight: 10,
   },
   chatHeaderCenter: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   chatHeaderAvatarFrame: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F1F5F9', overflow: 'hidden',
+    backgroundColor: colors.slate[100], overflow: 'hidden',
     justifyContent: 'center', alignItems: 'center', marginRight: 10,
   },
   chatHeaderAvatar: { width: '100%', height: '100%' },
-  headerTitleText: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  headerSubtitleText: { fontSize: 11, color: '#64748B', fontWeight: '500', marginTop: 1 },
+  headerTitleText: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  headerSubtitleText: { fontSize: 11, color: colors.textSecondary, fontFamily: fontFamily.medium, marginTop: 1 },
   
   contextBanner: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F8FAFC', padding: 12,
-    borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
+    backgroundColor: colors.backgroundMuted, padding: 12,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   contextImage: { width: 40, height: 40, borderRadius: 8 },
   contextPlaceholder: {
-    width: 40, height: 40, borderRadius: 8, backgroundColor: '#E2E8F0',
+    width: 40, height: 40, borderRadius: 8, backgroundColor: colors.border,
     justifyContent: 'center', alignItems: 'center',
   },
   contextDetails: { flex: 1, marginLeft: 12 },
-  contextTitle: { fontSize: 14, fontWeight: '600', color: '#475569' },
-  contextPrice: { fontSize: 14, fontWeight: '800', color: '#1E293B', marginTop: 2 },
+  contextTitle: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600] },
+  contextPrice: { fontSize: 14, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginTop: 2 },
   
   messagesScrollList: { padding: 16, paddingBottom: 24 },
   emptyChat: { alignItems: 'center', marginTop: 80 },
-  emptyChatText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 },
+  emptyChatText: { color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12 },
   bubbleWrapper: { flexDirection: 'row', marginBottom: 10, width: '100%' },
   bubbleMine: { justifyContent: 'flex-end' },
   bubbleTheirs: { justifyContent: 'flex-start' },
@@ -940,38 +956,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingTop: 8, paddingBottom: 6, 
     borderRadius: 18, maxWidth: '82%', minWidth: 90, 
   },
-  containerMine: { backgroundColor: '#34C759', borderBottomRightRadius: 4 },
+  containerMine: { backgroundColor: colors.brand, borderBottomRightRadius: 4 },
   containerTheirs: {
-    backgroundColor: '#fff', borderBottomLeftRadius: 4,
-    borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: colors.white, borderBottomLeftRadius: 4,
+    borderWidth: 1, borderColor: colors.border,
   },
-  bubbleText: { fontSize: 15, lineHeight: 22, fontWeight: '500' },
-  textMine: { color: '#fff' },
-  textTheirs: { color: '#334155' },
+  bubbleText: { fontSize: 15, lineHeight: 22, fontFamily: fontFamily.medium },
+  textMine: { color: colors.white },
+  textTheirs: { color: colors.slate[700] },
   bubbleStatusMetaRow: { 
     flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', 
     marginTop: 4, width: '100%', 
   },
-  timestampText: { fontSize: 10, fontWeight: '600', flexShrink: 0, },
+  timestampText: { fontSize: 10, fontFamily: fontFamily.semibold, flexShrink: 0, },
   timestampMine: { color: '#D1FAE5' },
-  timestampTheirs: { color: '#94A3B8' },
+  timestampTheirs: { color: colors.textTertiary },
   inputDockContainer: {
     flexDirection: 'row', padding: 12, paddingHorizontal: 16,
-    borderTopWidth: 1, borderTopColor: '#E2E8F0',
-    alignItems: 'flex-end', backgroundColor: '#fff',
+    borderTopWidth: 1, borderTopColor: colors.border,
+    alignItems: 'flex-end', backgroundColor: colors.white,
     paddingBottom: Platform.OS === 'android' ? 28 : 12,
   },
   chatInputField: {
-    flex: 1, backgroundColor: '#F8FAFC', borderWidth: 1,
-    borderColor: '#E2E8F0', borderRadius: 20,
+    flex: 1, backgroundColor: colors.backgroundMuted, borderWidth: 1,
+    borderColor: colors.border, borderRadius: 20,
     paddingHorizontal: 16, paddingVertical: 10,
-    fontSize: 14, maxHeight: 100, color: '#334155', fontWeight: '500',
+    fontSize: 14, maxHeight: 100, color: colors.slate[700], fontFamily: fontFamily.medium,
   },
   sendActionButton: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#34C759', justifyContent: 'center',
+    backgroundColor: colors.brand, justifyContent: 'center',
     alignItems: 'center', marginLeft: 10,
   },
-  sendButtonDisabled: { backgroundColor: '#CBD5E1' },
+  sendButtonDisabled: { backgroundColor: colors.borderStrong },
 });
 

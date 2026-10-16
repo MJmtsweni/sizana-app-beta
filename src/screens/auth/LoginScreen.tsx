@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { 
-  View, Text, StyleSheet, TextInput, TouchableOpacity, 
-  ActivityIndicator, KeyboardAvoidingView, Platform, 
-  TouchableWithoutFeedback, Keyboard 
+import {
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  KeyboardAvoidingView, Platform,
+  TouchableWithoutFeedback, Keyboard
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { colors, radii, spacing, typography, fontFamily } from '../../theme';
+import Button from '../../components/ui/Button';
+import SocialSignInButtons from '../../components/SocialSignInButtons';
 
 export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
@@ -60,22 +63,22 @@ export default function LoginScreen({ navigation }: any) {
             <Text style={styles.label}>Password</Text>
             <View style={[styles.passwordContainer, passwordError && styles.inputError]}>
               <TextInput style={styles.passwordInput} placeholder="••••••••" value={password} onChangeText={(t) => { setPassword(t); setPasswordError(''); }} secureTextEntry={!showPassword} />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-                <Ionicons name={showPassword ? "eye-off" : "eye"} size={20} color="#64748B" />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon} accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                <Ionicons name={showPassword ? "eye-off" : "eye"} size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
             {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={signInWithEmail} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity 
+          <Button label="Sign In" onPress={signInWithEmail} loading={loading} fullWidth size="lg" style={styles.button} />
+          <TouchableOpacity
   style={styles.forgotPasswordButton} 
   onPress={() => navigation.navigate('ForgotPassword')}
 >
   <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
 </TouchableOpacity>
+
+          <SocialSignInButtons mode="signIn" />
 
           <TouchableOpacity onPress={() => navigation.navigate('SignUp')} style={styles.footerLink}>
             <Text style={styles.linkText}>Don't have an account? <Text style={styles.boldLink}>Sign Up</Text></Text>
@@ -87,23 +90,22 @@ export default function LoginScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  innerContainer: { flex: 1, justifyContent: 'center', padding: 24 },
-  header: { fontSize: 32, fontWeight: '800', marginBottom: 40, textAlign: 'center', color: '#34C759' },
-  formGroup: { marginBottom: 16 },
-  label: { fontSize: 14, fontWeight: '600', color: '#475569', marginBottom: 8, marginLeft: 4 },
-  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 16, borderRadius: 12, fontSize: 16 },
-  inputError: { borderColor: '#EF4444' },
-  errorText: { color: '#EF4444', fontSize: 12, marginTop: 4, marginLeft: 4 },
-  errorBanner: { color: '#EF4444', textAlign: 'center', marginBottom: 16, fontWeight: '600' },
-  passwordContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12 },
-  passwordInput: { flex: 1, padding: 16, fontSize: 16, color: '#1E293B' },
-  eyeIcon: { padding: 16 },
-  button: { backgroundColor: '#34C759', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 10 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  footerLink: { textAlign: 'center', marginTop: 24 },
-  forgotPasswordButton: { alignItems: 'center', marginTop: 12 },
-  forgotPasswordText: { color: '#64748B', fontSize: 15 },
-  linkText: { color: '#64748B', fontSize: 15 },
-  boldLink: { color: '#34C759', fontWeight: '700' }
+  container: { flex: 1, backgroundColor: colors.background },
+  innerContainer: { flex: 1, justifyContent: 'center', padding: spacing.xxl },
+  header: { ...typography.display, marginBottom: spacing.huge, textAlign: 'center', color: colors.brand },
+  formGroup: { marginBottom: spacing.lg },
+  label: { ...typography.bodyMedium, color: colors.slate[600], marginBottom: spacing.sm, marginLeft: spacing.xs },
+  input: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, borderRadius: radii.md, fontSize: 16, fontFamily: typography.bodyLarge.fontFamily, color: colors.textPrimary },
+  inputError: { borderColor: colors.danger },
+  errorText: { color: colors.danger, fontFamily: fontFamily.regular, fontSize: 12, marginTop: spacing.xs, marginLeft: spacing.xs },
+  errorBanner: { ...typography.bodyMedium, color: colors.danger, textAlign: 'center', marginBottom: spacing.lg },
+  passwordContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md },
+  passwordInput: { flex: 1, padding: spacing.lg, fontSize: 16, fontFamily: typography.bodyLarge.fontFamily, color: colors.textPrimary },
+  eyeIcon: { padding: spacing.lg },
+  button: { marginTop: spacing.sm },
+  footerLink: { textAlign: 'center', marginTop: spacing.xxl },
+  forgotPasswordButton: { alignItems: 'center', marginTop: spacing.md },
+  forgotPasswordText: { ...typography.body, color: colors.textSecondary },
+  linkText: { ...typography.body, color: colors.textSecondary },
+  boldLink: { color: colors.brand, fontFamily: typography.bodyMedium.fontFamily }
 });
