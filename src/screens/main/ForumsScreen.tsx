@@ -525,7 +525,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
         refreshing={refreshing}
         onEndReached={loadMorePosts}
         onEndReachedThreshold={0.5}
-        ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
         ListEmptyComponent={
           scope === 'home' && !myLocation ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
@@ -554,7 +554,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
                 No posts found {scope === 'home' ? `at home in ${myLocation}` : 'nearby'} yet.
               </Text>
             </View>
-          ) : null
+          ) : undefined
         }
       />
 

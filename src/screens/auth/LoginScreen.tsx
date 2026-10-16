@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { colors, radii, spacing, typography } from '../../theme';
 import Button from '../../components/ui/Button';
+import SocialSignInButtons from '../../components/SocialSignInButtons';
 
 export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
@@ -76,6 +77,8 @@ export default function LoginScreen({ navigation }: any) {
 >
   <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
 </TouchableOpacity>
+
+          <SocialSignInButtons mode="signIn" />
 
           <TouchableOpacity onPress={() => navigation.navigate('SignUp')} style={styles.footerLink}>
             <Text style={styles.linkText}>Don't have an account? <Text style={styles.boldLink}>Sign Up</Text></Text>

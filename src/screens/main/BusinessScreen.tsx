@@ -515,7 +515,7 @@ export default function BusinessScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           onEndReached={loadMoreBusinesses}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <EmptyState

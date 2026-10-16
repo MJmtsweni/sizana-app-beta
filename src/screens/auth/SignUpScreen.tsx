@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, TextInput, TouchableOpacity, 
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform, 
-  ScrollView, UIManager, LayoutAnimation, Image
+  ScrollView, LayoutAnimation, Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
@@ -11,32 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontFamily } from '../../theme';
 import { haptics } from '../../lib/haptics';
 import { compressImage } from '../../lib/mediaCompression';
-
-// Enable LayoutAnimation on Android
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-const INTEREST_CATEGORIES = [
-  'Parties & Celebrations', 'Weddings', 'Music & Concerts', 'Arts & Entertainment', 
-  'Sports & Fitness', 'Business & Networking', 'Education & Learning', 'Technology & Gaming', 
-  'Food & Drink', 'Markets & Shopping', 'Community & Charity', 'Religious & Spiritual', 
-  'Family & Kids', 'Cultural & Heritage', 'Health & Wellness', 'Outdoor & Nature', 
-  'Automotive', 'Pets & Animals', 'Private Events', 'Online & Virtual', 
-  'Government & Public Services', 'Other'
-];
-
-const SA_REGIONS = {
-  "Gauteng": ["Johannesburg", "Pretoria", "Centurion", "Midrand"],
-  "North West": ["Vryburg", "Potchefstroom", "Klerksdorp", "Mahikeng", "Rustenburg"],
-  "Western Cape": ["Cape Town", "Stellenbosch", "George", "Paarl"],
-  "KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"],
-  "Free State": ["Bloemfontein", "Welkom"],
-  "Eastern Cape": ["Gqeberha", "East London", "Mthatha"],
-  "Limpopo": ["Polokwane", "Tzaneen"],
-  "Mpumalanga": ["Nelspruit", "Witbank"],
-  "Northern Cape": ["Kimberley", "Upington"]
-};
+import { INTEREST_CATEGORIES, SA_REGIONS } from '../../lib/profileOptions';
+import SocialSignInButtons from '../../components/SocialSignInButtons';
 
 export default function SignUpScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -104,7 +80,7 @@ export default function SignUpScreen({ navigation }: any) {
 
   async function pickImage() {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
@@ -222,6 +198,10 @@ export default function SignUpScreen({ navigation }: any) {
         <Text style={styles.primaryButtonText}>Continue</Text>
         <Ionicons name="arrow-forward" size={18} color="#fff" style={{ marginLeft: 8 }} />
       </TouchableOpacity>
+
+      {/* Social sign-ups skip steps 2-3 here; CompleteProfileScreen collects
+          regions and interests right after the account is created. */}
+      <SocialSignInButtons mode="signUp" />
 
       <View style={styles.footerRow}>
         <Text style={styles.footerText}>Already have an account? </Text>

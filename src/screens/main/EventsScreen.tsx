@@ -348,7 +348,7 @@ export default function EventsScreen({ navigation, route }: any) {
 
   async function pickImage() {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [16, 9],
       quality: 0.7,
@@ -613,7 +613,7 @@ export default function EventsScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           onEndReached={loadMoreEvents}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <View style={styles.emptyLayout}>

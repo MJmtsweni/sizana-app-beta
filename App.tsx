@@ -14,6 +14,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import BusinessProfileScreen from './src/screens/main/BusinessProfileScreen';
 import FriendsScreen from './src/screens/main/FriendsScreen';
 import ForgotPasswordScreen from './src/screens/auth/ForgotPasswordScreen';
+import CompleteProfileScreen from './src/screens/auth/CompleteProfileScreen';
 import PublicProfileScreen from './src/screens/main/PublicProfileScreen';
 import AppHeader from './src/screens/main/AppHeader';
 import { Ionicons } from '@expo/vector-icons';
@@ -170,6 +171,10 @@ function NotificationBridge({ session }: { session: Session | null }) {
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
+  // Which user's profile has been checked for onboarding, and whether that
+  // user still needs CompleteProfileScreen (null = no onboarding needed).
+  const [profileCheckedFor, setProfileCheckedFor] = useState<string | null>(null);
+  const [onboarding, setOnboarding] = useState<{ username: string } | null>(null);
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
   const fontsLoaded = useAppFonts();
 
@@ -198,20 +203,58 @@ export default function App() {
     };
   }, []);
 
+  // Google/Apple sign-ups create the account before we know the user's
+  // regions and interests (email sign-up collects them in its wizard), so
+  // route them through CompleteProfileScreen until those are filled in.
+  // Email users are never redirected, and a failed lookup never blocks
+  // entry — worst case the user fills it in later from their profile.
+  const userId = session?.user?.id ?? null;
+  const provider = session?.user?.app_metadata?.provider;
+  useEffect(() => {
+    if (!userId) {
+      setOnboarding(null);
+      setProfileCheckedFor(null);
+      return;
+    }
+    if (!provider || provider === 'email') {
+      setOnboarding(null);
+      setProfileCheckedFor(userId);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await withRetry(() =>
+          supabase.from('users').select('username, regions, interests').eq('id', userId).single()
+        );
+        if (cancelled) return;
+        const incomplete = data && (!data.regions?.length || !data.interests?.length);
+        setOnboarding(incomplete ? { username: data.username || '' } : null);
+      } catch {
+        if (!cancelled) setOnboarding(null);
+      } finally {
+        if (!cancelled) setProfileCheckedFor(userId);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, provider]);
+
+  const profileResolved = !userId || profileCheckedFor === userId;
+
   // The moment auth is resolved, hand off from the native splash to our
   // AnimatedSplash — it renders on top of the same blank frame, so there's
   // no flash of empty white in between the two.
   useEffect(() => {
-    if (authResolved && fontsLoaded) {
+    if (authResolved && fontsLoaded && profileResolved) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [authResolved, fontsLoaded]);
+  }, [authResolved, fontsLoaded, profileResolved]);
 
   const handleAnimationFinish = useCallback(() => {
     setShowAnimatedSplash(false);
   }, []);
 
-  if (!authResolved || !fontsLoaded) {
+  if (!authResolved || !fontsLoaded || !profileResolved) {
     return null; // native splash is still showing — nothing to render yet
   }
 
@@ -225,7 +268,17 @@ export default function App() {
       <NotificationBridge session={session} />
       <NavigationContainer ref={navigationRef} linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Dashboard">
-        {session && session.user ? (
+        {session && session.user && onboarding ? (
+          <Stack.Screen name="CompleteProfile">
+            {() => (
+              <CompleteProfileScreen
+                session={session}
+                initialUsername={onboarding.username}
+                onComplete={() => setOnboarding(null)}
+              />
+            )}
+          </Stack.Screen>
+        ) : session && session.user ? (
           <>
             <Stack.Screen
               name="Dashboard"

@@ -367,7 +367,7 @@ export default function NotificationsScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           onEndReached={loadMoreNotifications}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
               <Ionicons name="notifications-off-outline" size={60} color="#CBD5E1" />

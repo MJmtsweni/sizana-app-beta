@@ -11,27 +11,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { compressImage } from '../../lib/mediaCompression';
 import { withRetry } from '../../lib/network';
+import { INTEREST_CATEGORIES, SA_REGIONS } from '../../lib/profileOptions';
+import { signOutOfSocialProviders } from '../../lib/socialAuth';
 
-const INTEREST_CATEGORIES = [
-  'Parties & Celebrations', 'Weddings', 'Music & Concerts', 'Arts & Entertainment', 
-  'Sports & Fitness', 'Business & Networking', 'Education & Learning', 'Technology & Gaming', 
-  'Food & Drink', 'Markets & Shopping', 'Community & Charity', 'Religious & Spiritual', 
-  'Family & Kids', 'Cultural & Heritage', 'Health & Wellness', 'Outdoor & Nature', 
-  'Automotive', 'Pets & Animals', 'Private Events', 'Online & Virtual', 
-  'Government & Public Services', 'Other'
-];
 
-const SA_REGIONS = {
-  "Gauteng": ["Johannesburg", "Pretoria", "Centurion", "Midrand"],
-  "North West": ["Vryburg", "Taung", "Potchefstroom", "Klerksdorp", "Mahikeng", "Rustenburg"],
-  "Western Cape": ["Cape Town", "Stellenbosch", "George", "Paarl"],
-  "KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"],
-  "Free State": ["Bloemfontein", "Welkom"],
-  "Eastern Cape": ["Gqeberha", "East London", "Mthatha"],
-  "Limpopo": ["Polokwane", "Tzaneen"],
-  "Mpumalanga": ["Nelspruit", "Witbank"],
-  "Northern Cape": ["Kimberley", "Upington"]
-};
 
 export default function ProfileScreen({ route, navigation }: any) {
   const session = route?.params?.session;
@@ -222,6 +205,7 @@ export default function ProfileScreen({ route, navigation }: any) {
     Alert.alert("Sign Out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
       { text: "Log Out", style: "destructive", onPress: async () => {
+          await signOutOfSocialProviders();
           await supabase.auth.signOut();
       }}
     ]);
@@ -252,6 +236,7 @@ export default function ProfileScreen({ route, navigation }: any) {
                     try {
                       const { error } = await supabase.rpc('delete_account');
                       if (error) throw error;
+                      await signOutOfSocialProviders();
                       await supabase.auth.signOut();
                     } catch (e: any) {
                       Alert.alert("Couldn't delete account", e.message || "Please try again, or contact support if this keeps happening.");

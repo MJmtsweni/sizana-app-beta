@@ -482,7 +482,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#34C759']} />}
           onEndReached={loadMoreListings}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : null}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             <EmptyState
               icon="alert-circle-outline"
