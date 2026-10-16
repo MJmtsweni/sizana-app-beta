@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
+import { colors, fontFamily } from '../../theme';
 export default function ForgotPasswordScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,7 +48,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
         />
 
         <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send Reset Link</Text>}
+          {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Send Reset Link</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -59,14 +60,14 @@ export default function ForgotPasswordScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   innerContainer: { flex: 1, justifyContent: 'center', padding: 24 },
-  header: { fontSize: 28, fontWeight: '800', color: '#1E293B', marginBottom: 12, textAlign: 'center' },
-  subtitle: { fontSize: 16, color: '#64748B', marginBottom: 32, textAlign: 'center' },
-  label: { fontSize: 14, fontWeight: '600', color: '#475569', marginBottom: 8, marginLeft: 4 },
-  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 16, borderRadius: 12, fontSize: 16, marginBottom: 20 },
-  button: { backgroundColor: '#34C759', padding: 16, borderRadius: 12, alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  header: { fontSize: 28, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 12, textAlign: 'center' },
+  subtitle: { fontFamily: fontFamily.regular, fontSize: 16, color: colors.textSecondary, marginBottom: 32, textAlign: 'center' },
+  label: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600], marginBottom: 8, marginLeft: 4 },
+  input: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, padding: 16, borderRadius: 12, fontFamily: fontFamily.regular, fontSize: 16, marginBottom: 20 },
+  button: { backgroundColor: colors.brand, padding: 16, borderRadius: 12, alignItems: 'center' },
+  buttonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
   backButton: { marginTop: 24, alignItems: 'center' },
-  backButtonText: { color: '#64748B', fontWeight: '600' }
+  backButtonText: { color: colors.textSecondary, fontFamily: fontFamily.semibold }
 });

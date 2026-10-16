@@ -18,7 +18,8 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "monochromeImage": "./assets/adaptive-icon-monochrome.png",
+        "backgroundColor": "#1B7133"
       },
       "package": "za.co.sizana.app",
       "softwareKeyboardLayoutMode": "resize",
@@ -41,7 +42,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#34C759",
+          "color": "#1B7133",
           "sounds": [
             "./assets/sounds/notification.wav"
           ]

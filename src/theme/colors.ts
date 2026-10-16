@@ -1,7 +1,9 @@
-// Single source of truth for color. These values codify the palette that was
-// already dominant across the app (Slate neutrals + iOS-green brand + Tailwind
-// blue/red/amber accents) rather than inventing a new one — the goal is
-// consistency, not a redesign.
+// Single source of truth for color. The greens come from the Sizana brand kit
+// (assets/brand/): #1B7133 is the logo's dark green and the primary brand
+// color — white text on it is 6.1:1, comfortably past WCAG AA. #2DAD4D is the
+// logo's light green, used for fills and icons only: white text on it is
+// ~2.9:1, too low for buttons or body text. Slate neutrals and the blue/red/
+// amber status accents are unchanged.
 
 const slate = {
   50: '#F8FAFC',
@@ -17,11 +19,11 @@ const slate = {
 };
 
 const green = {
-  50: '#F0FDF4',
-  100: '#DCFCE7',
-  500: '#34C759',
-  600: '#22A745',
-  700: '#15803D',
+  50: '#EEF8F1',
+  100: '#D5EEDC',
+  500: '#2DAD4D', // brand kit light green
+  600: '#1B7133', // brand kit dark green — primary
+  700: '#145627',
 };
 
 const blue = {
@@ -50,8 +52,9 @@ export const colors = {
   amber,
 
   // Semantic tokens — prefer these over the raw scales above in screen code.
-  brand: green[500],
-  brandPressed: green[600],
+  brand: green[600],
+  brandPressed: green[700],
+  brandLight: green[500],
   brandSubtle: green[50],
   brandSubtleStrong: green[100],
 

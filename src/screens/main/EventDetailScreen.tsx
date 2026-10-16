@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { colors, fontFamily } from '../../theme';
 export default function EventDetailScreen({ route, navigation }: any) {
   const eventId = route.params?.id || route.params?.event?.id;
   const session = route.params?.session;
@@ -89,7 +90,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#34C759" />
+        <ActivityIndicator size="large" color={colors.brand} />
       </View>
     );
   }
@@ -107,7 +108,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
             <Image source={{ uri: event.image_url }} style={styles.heroImage} />
           ) : (
             <View style={[styles.heroImage, styles.placeholderBanner]}>
-              <Ionicons name="calendar" size={60} color="#94A3B8" />
+              <Ionicons name="calendar" size={60} color={colors.textTertiary} />
             </View>
           )}
           
@@ -115,7 +116,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
             style={[styles.backButton, { top: Math.max(insets.top, 20) }]} 
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={24} color="#1E293B" />
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
         </View>
 
@@ -124,7 +125,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
             <Text style={styles.categoryBadgeText}>{event.category}</Text>
             {event.is_private && (
               <View style={styles.privateBadge}>
-                <Ionicons name="lock-closed" size={12} color="#64748B" />
+                <Ionicons name="lock-closed" size={12} color={colors.textSecondary} />
                 <Text style={styles.privateBadgeText}>Private Invite</Text>
               </View>
             )}
@@ -141,7 +142,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
             {displayAvatar ? (
               <Image source={{ uri: displayAvatar }} style={styles.creatorAvatar} />
             ) : (
-              <Ionicons name={isBusinessEvent ? "briefcase" : "person-circle"} size={44} color="#CBD5E1" />
+              <Ionicons name={isBusinessEvent ? "briefcase" : "person-circle"} size={44} color={colors.borderStrong} />
             )}
             <View style={{ marginLeft: 12 }}>
               <Text style={styles.creatorName}>{displayName}</Text>
@@ -152,7 +153,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
           <View style={styles.divider} />
 
           <View style={styles.infoBlock}>
-            <View style={styles.iconBox}><Ionicons name="calendar-outline" size={24} color="#34C759" /></View>
+            <View style={styles.iconBox}><Ionicons name="calendar-outline" size={24} color={colors.brand} /></View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>{day}</Text>
               <Text style={styles.infoSubtitle}>{time}</Text>
@@ -160,7 +161,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
           </View>
 
           <View style={styles.infoBlock}>
-            <View style={styles.iconBox}><Ionicons name="location-outline" size={24} color="#34C759" /></View>
+            <View style={styles.iconBox}><Ionicons name="location-outline" size={24} color={colors.brand} /></View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>{event.location}</Text>
             </View>
@@ -192,45 +193,45 @@ export default function EventDetailScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
   heroContainer: { width: '100%', height: 300, position: 'relative' },
   heroImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  placeholderBanner: { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  placeholderBanner: { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   backButton: { position: 'absolute', left: 20, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 4 },
   
-  contentCard: { backgroundColor: '#F8FAFC', borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -30, padding: 24, minHeight: 500 },
+  contentCard: { backgroundColor: colors.backgroundMuted, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -30, padding: 24, minHeight: 500 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  categoryBadgeText: { fontSize: 12, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase' },
-  privateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' },
-  privateBadgeText: { fontSize: 11, fontWeight: '700', color: '#64748B', marginLeft: 6 },
+  categoryBadgeText: { fontSize: 12, fontFamily: fontFamily.extrabold, color: colors.accent, textTransform: 'uppercase' },
+  privateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
+  privateBadgeText: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.textSecondary, marginLeft: 6 },
   
-  eventTitle: { fontSize: 26, fontWeight: '800', color: '#1E293B', marginBottom: 24 },
+  eventTitle: { fontSize: 26, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 24 },
   
   infoBlock: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  iconBox: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#F0FDF4', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  iconBox: { width: 48, height: 48, borderRadius: 16, backgroundColor: colors.brandSubtle, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
   infoTextContainer: { flex: 1 },
-  infoTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
-  infoSubtitle: { fontSize: 13, color: '#64748B', marginTop: 2, fontWeight: '500' },
+  infoTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  infoSubtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 2, fontFamily: fontFamily.medium },
   
-  divider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 24 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 24 },
   
   creatorRow: { flexDirection: 'row', alignItems: 'center' },
   creatorAvatar: { width: 44, height: 44, borderRadius: 22 },
-  creatorName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  creatorLabel: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
+  creatorName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  creatorLabel: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textTertiary, marginTop: 2 },
   
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 12 },
-  descriptionText: { fontSize: 15, color: '#475569', lineHeight: 24 },
+  sectionTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 12 },
+  descriptionText: { fontFamily: fontFamily.regular, fontSize: 15, color: colors.slate[600], lineHeight: 24 },
 
-  bottomDock: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 10 },
+  bottomDock: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: colors.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 10 },
   attendeesContainer: { flex: 1 },
-  attendeesCount: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  attendeesLabel: { fontSize: 12, color: '#64748B', fontWeight: '600' },
+  attendeesCount: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  attendeesLabel: { fontSize: 12, color: colors.textSecondary, fontFamily: fontFamily.semibold },
   
-  rsvpButton: { flex: 2, backgroundColor: '#F1F5F9', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
-  rsvpButtonActive: { backgroundColor: '#34C759' },
-  rsvpText: { fontSize: 16, fontWeight: '800', color: '#64748B' },
-  rsvpTextActive: { color: '#fff' },
+  rsvpButton: { flex: 2, backgroundColor: colors.slate[100], paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  rsvpButtonActive: { backgroundColor: colors.brand },
+  rsvpText: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textSecondary },
+  rsvpTextActive: { color: colors.white },
 });

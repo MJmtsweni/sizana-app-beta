@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { colors, fontFamily } from '../theme';
 
 // Same navbar mark used in AppHeader — one logo asset, one source of truth.
-const LOGO_MARK = require('../../assets/sizana-navbar-icon.png');
+const LOGO_MARK = require('../../assets/brand/sizana-icon-512.png');
 
 type AnimatedSplashProps = {
   onFinish: () => void;
@@ -78,7 +78,7 @@ export default function AnimatedSplash({ onFinish, minDurationMs = 1700 }: Anima
           { opacity: wordmarkOpacity, transform: [{ translateY: wordmarkTranslateY }] },
         ]}
       >
-        SIZANA
+        Sizana
       </Animated.Text>
       <Animated.Text style={[styles.tagline, { opacity: taglineOpacity }]}>
         Helping each other
@@ -97,14 +97,13 @@ const styles = StyleSheet.create({
   logo: {
     width: 96,
     height: 96,
-    borderRadius: 48,
     marginBottom: 18,
   },
   wordmark: {
     fontSize: 30,
     fontFamily: fontFamily.extrabold,
-    color: colors.textPrimary,
-    letterSpacing: 0.5,
+    color: colors.brand,
+    letterSpacing: -0.5,
   },
   tagline: {
     fontSize: 14,

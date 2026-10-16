@@ -9,6 +9,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { withRetry } from '../../lib/network';
 import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
+import { colors, fontFamily } from '../../theme';
 export default function NotificationsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
 
@@ -284,23 +285,23 @@ export default function NotificationsScreen({ navigation, route }: any) {
   // Config map for all supported notification types
   const getTypeConfig = (type: string, actorName: string) => {
     switch (type) {
-      case 'like': return { icon: 'heart' as const, badgeColor: '#EF4444', message: 'liked your post.' };
-      case 'comment': return { icon: 'chatbubble' as const, badgeColor: '#3B82F6', message: 'commented on your discussion.' };
+      case 'like': return { icon: 'heart' as const, badgeColor: colors.danger, message: 'liked your post.' };
+      case 'comment': return { icon: 'chatbubble' as const, badgeColor: colors.accent, message: 'commented on your discussion.' };
       case 'follow': return { icon: 'person-add' as const, badgeColor: '#8B5CF6', message: 'started following your business.' };
-      case 'rsvp': return { icon: 'calendar' as const, badgeColor: '#F59E0B', message: 'is attending your event.' };
-      case 'message': return { icon: 'chatbubble-ellipses' as const, badgeColor: '#34C759', message: 'sent you a message.' };
-      case 'business_inquiry': return { icon: 'briefcase' as const, badgeColor: '#3B82F6', message: 'sent your business a new inquiry.' };
-      case 'market_inquiry': return { icon: 'pricetag' as const, badgeColor: '#F59E0B', message: 'asked about your listing.' };
-      case 'review': return { icon: 'star' as const, badgeColor: '#F59E0B', message: 'left a review on your business.' };
+      case 'rsvp': return { icon: 'calendar' as const, badgeColor: colors.warning, message: 'is attending your event.' };
+      case 'message': return { icon: 'chatbubble-ellipses' as const, badgeColor: colors.brand, message: 'sent you a message.' };
+      case 'business_inquiry': return { icon: 'briefcase' as const, badgeColor: colors.accent, message: 'sent your business a new inquiry.' };
+      case 'market_inquiry': return { icon: 'pricetag' as const, badgeColor: colors.warning, message: 'asked about your listing.' };
+      case 'review': return { icon: 'star' as const, badgeColor: colors.warning, message: 'left a review on your business.' };
       case 'seller_review': return { icon: 'pricetag' as const, badgeColor: '#F97316', message: 'rated you as a marketplace seller.' };
       case 'user_follow': return { icon: 'person-add' as const, badgeColor: '#8B5CF6', message: 'started following you.' };
-      case 'friend_request': return { icon: 'people' as const, badgeColor: '#3B82F6', message: 'sent you a friend request.' };
-      case 'friend_accept': return { icon: 'checkmark-circle' as const, badgeColor: '#34C759', message: 'accepted your friend request.' };
+      case 'friend_request': return { icon: 'people' as const, badgeColor: colors.accent, message: 'sent you a friend request.' };
+      case 'friend_accept': return { icon: 'checkmark-circle' as const, badgeColor: colors.brand, message: 'accepted your friend request.' };
       // Broadcast Types:
-      case 'network_post': return { icon: 'chatbubbles' as const, badgeColor: '#3B82F6', message: 'published a new forum post.' };
-      case 'network_event': return { icon: 'calendar' as const, badgeColor: '#EF4444', message: 'created a new event.' };
-      case 'network_market': return { icon: 'pricetag' as const, badgeColor: '#10B981', message: 'listed a new marketplace item.' };
-      default: return { icon: 'notifications' as const, badgeColor: '#64748B', message: 'has new activity.' };
+      case 'network_post': return { icon: 'chatbubbles' as const, badgeColor: colors.accent, message: 'published a new forum post.' };
+      case 'network_event': return { icon: 'calendar' as const, badgeColor: colors.danger, message: 'created a new event.' };
+      case 'network_market': return { icon: 'pricetag' as const, badgeColor: colors.brandLight, message: 'listed a new marketplace item.' };
+      default: return { icon: 'notifications' as const, badgeColor: colors.textSecondary, message: 'has new activity.' };
     }
   };
 
@@ -318,14 +319,14 @@ export default function NotificationsScreen({ navigation, route }: any) {
           {item.actor?.avatar_url ? (
             <Image source={{ uri: item.actor.avatar_url }} style={styles.avatarImage} />
           ) : (
-            <Ionicons name="person-circle" size={44} color="#CBD5E1" />
+            <Ionicons name="person-circle" size={44} color={colors.borderStrong} />
           )}
           
           <View 
             style={[styles.actionBadge, { backgroundColor: config.badgeColor }]}
             pointerEvents="none" 
           >
-            <Ionicons name={config.icon} size={10} color="#fff" />
+            <Ionicons name={config.icon} size={10} color={colors.white} />
           </View>
         </View>
 
@@ -346,16 +347,16 @@ export default function NotificationsScreen({ navigation, route }: any) {
     <View style={styles.mainContainer}>
       <View style={[styles.navPanel, { zIndex: 10, elevation: 10 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#1E293B" />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.navTitle}>Activity Center</Text>
         <TouchableOpacity onPress={handleClearAll} style={{ padding: 8 }}>
-          <Ionicons name="trash-outline" size={24} color="#EF4444" />
+          <Ionicons name="trash-outline" size={24} color={colors.danger} />
         </TouchableOpacity>
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
           data={notifications}
@@ -367,10 +368,10 @@ export default function NotificationsScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           onEndReached={loadMoreNotifications}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
-              <Ionicons name="notifications-off-outline" size={60} color="#CBD5E1" />
+              <Ionicons name="notifications-off-outline" size={60} color={colors.borderStrong} />
               <Text style={styles.emptyText}>You're all caught up! No new notifications.</Text>
             </View>
           }
@@ -381,41 +382,41 @@ export default function NotificationsScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   navPanel: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 60 : 45,
-    paddingBottom: 15, backgroundColor: '#fff',
-    borderBottomWidth: 1, borderBottomColor: '#E2E8F0'
+    paddingBottom: 15, backgroundColor: colors.white,
+    borderBottomWidth: 1, borderBottomColor: colors.border
   },
   backButton: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center'
+    backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center'
   },
-  navTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B' },
+  navTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   notificationCard: {
     flexDirection: 'row', alignItems: 'center',
-    padding: 16, backgroundColor: '#fff',
-    borderBottomWidth: 1, borderBottomColor: '#F1F5F9'
+    padding: 16, backgroundColor: colors.white,
+    borderBottomWidth: 1, borderBottomColor: colors.slate[100]
   },
-  unreadCard: { backgroundColor: '#F0FDF4' },
+  unreadCard: { backgroundColor: colors.brandSubtle },
   avatarWrapper: { position: 'relative', marginRight: 12 },
   avatarImage: { width: 44, height: 44, borderRadius: 22 },
   actionBadge: {
     position: 'absolute', bottom: -2, right: -2,
     width: 20, height: 20, borderRadius: 10,
     justifyContent: 'center', alignItems: 'center',
-    borderWidth: 2, borderColor: '#fff'
+    borderWidth: 2, borderColor: colors.white
   },
   textContainer: { flex: 1, justifyContent: 'center' },
-  messageText: { fontSize: 14, color: '#334155', lineHeight: 20 },
-  boldText: { fontWeight: '700', color: '#1E293B' },
-  timeText: { fontSize: 12, color: '#94A3B8', marginTop: 4, fontWeight: '500' },
+  messageText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[700], lineHeight: 20 },
+  boldText: { fontFamily: fontFamily.bold, color: colors.textPrimary },
+  timeText: { fontSize: 12, color: colors.textTertiary, marginTop: 4, fontFamily: fontFamily.medium },
   unreadDot: {
     width: 10, height: 10, borderRadius: 5,
-    backgroundColor: '#34C759', marginLeft: 10
+    backgroundColor: colors.brand, marginLeft: 10
   },
   emptyLayout: { alignItems: 'center', marginTop: 100, paddingHorizontal: 40 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 16, textAlign: 'center' }
+  emptyText: { color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 16, textAlign: 'center' }
 });

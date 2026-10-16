@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { pickAndUploadImage } from '../../lib/imageUpload';
 import { BUSINESS_CATEGORIES } from '../../lib/businessCategories';
 import { ModalSheet, CategoryPicker } from '../../components/ui';
-import { colors, radii, spacing, typography } from '../../theme';
+import { colors, radii, spacing, typography, fontFamily } from '../../theme';
 
 export default function EditBusinessModal({ visible, onClose, business, onUpdate }: any) {
   const [loading, setLoading] = useState(false);
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.md,
     padding: spacing.md,
-    fontSize: 15,
+    fontFamily: fontFamily.regular, fontSize: 15,
     color: colors.textPrimary,
     backgroundColor: colors.backgroundMuted,
   },
@@ -161,5 +161,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.xxl,
   },
-  saveButtonText: { color: colors.white, fontSize: 16, fontWeight: '700' },
+  saveButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
 });

@@ -154,11 +154,11 @@ export default function SignUpScreen({ navigation }: any) {
             <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Ionicons name="camera" size={32} color="#94A3B8" />
+              <Ionicons name="camera" size={32} color={colors.textTertiary} />
             </View>
           )}
           <View style={styles.avatarBadge}>
-            <Ionicons name="add" size={16} color="#fff" />
+            <Ionicons name="add" size={16} color={colors.white} />
           </View>
         </TouchableOpacity>
         <Text style={styles.avatarText}>Add Profile Photo</Text>
@@ -196,7 +196,7 @@ export default function SignUpScreen({ navigation }: any) {
 
       <TouchableOpacity style={styles.primaryButton} onPress={nextStep}>
         <Text style={styles.primaryButtonText}>Continue</Text>
-        <Ionicons name="arrow-forward" size={18} color="#fff" style={{ marginLeft: 8 }} />
+        <Ionicons name="arrow-forward" size={18} color={colors.white} style={{ marginLeft: 8 }} />
       </TouchableOpacity>
 
       {/* Social sign-ups skip steps 2-3 here; CompleteProfileScreen collects
@@ -215,7 +215,7 @@ export default function SignUpScreen({ navigation }: any) {
   const renderStep2 = () => (
     <View style={styles.stepContainer}>
       <TouchableOpacity style={styles.backNav} onPress={prevStep}>
-        <Ionicons name="arrow-back" size={24} color="#1E293B" />
+        <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
       </TouchableOpacity>
       <Text style={styles.header}>Your Locations</Text>
       <Text style={styles.subtitle}>Select up to 3 regions to customize your marketplace and events.</Text>
@@ -237,7 +237,7 @@ export default function SignUpScreen({ navigation }: any) {
                   onPress={() => toggleRegion(city)}
                 >
                   <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{city}</Text>
-                  {isActive && <Ionicons name="close" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                  {isActive && <Ionicons name="close" size={14} color={colors.white} style={{ marginLeft: 6 }} />}
                 </TouchableOpacity>
               );
             })}
@@ -247,7 +247,7 @@ export default function SignUpScreen({ navigation }: any) {
 
       <TouchableOpacity style={styles.primaryButton} onPress={nextStep}>
         <Text style={styles.primaryButtonText}>Next</Text>
-        <Ionicons name="arrow-forward" size={18} color="#fff" style={{ marginLeft: 8 }} />
+        <Ionicons name="arrow-forward" size={18} color={colors.white} style={{ marginLeft: 8 }} />
       </TouchableOpacity>
     </View>
   );
@@ -255,7 +255,7 @@ export default function SignUpScreen({ navigation }: any) {
   const renderStep3 = () => (
     <View style={styles.stepContainer}>
       <TouchableOpacity style={styles.backNav} onPress={prevStep}>
-        <Ionicons name="arrow-back" size={24} color="#1E293B" />
+        <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
       </TouchableOpacity>
       <Text style={styles.header}>Your Interests</Text>
       <Text style={styles.subtitle}>What do you want to see in your forums and feed?</Text>
@@ -270,17 +270,17 @@ export default function SignUpScreen({ navigation }: any) {
               onPress={() => toggleInterest(topic)}
             >
               <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{topic}</Text>
-              {isActive && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+              {isActive && <Ionicons name="checkmark" size={14} color={colors.white} style={{ marginLeft: 6 }} />}
             </TouchableOpacity>
           );
         })}
       </View>
 
       <TouchableOpacity style={styles.primaryButton} onPress={handleSignUp} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : (
+        {loading ? <ActivityIndicator color={colors.white} /> : (
           <>
             <Text style={styles.primaryButtonText}>Complete Sign Up</Text>
-            <Ionicons name="checkmark-circle" size={18} color="#fff" style={{ marginLeft: 8 }} />
+            <Ionicons name="checkmark-circle" size={18} color={colors.white} style={{ marginLeft: 8 }} />
           </>
         )}
       </TouchableOpacity>
@@ -342,12 +342,12 @@ const styles = StyleSheet.create({
   loginLink: { color: colors.brand, fontSize: 14, fontFamily: fontFamily.bold },
 
   selectionCountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
-  selectionCountText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.accent },
+  selectionCountText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.brand },
   provinceHeader: { fontSize: 14, fontFamily: fontFamily.extrabold, color: colors.textPrimary, textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 },
 
   pillContainer: { flexDirection: 'row', flexWrap: 'wrap' },
   pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
-  pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  pillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   pillText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600] },
   pillTextActive: { color: colors.white }
 });

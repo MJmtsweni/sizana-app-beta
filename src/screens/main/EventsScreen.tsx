@@ -20,6 +20,7 @@ import { getDistanceKm, formatDistance, NEARBY_RADIUS_KM } from '../../lib/dista
 import ScopeToggle, { Scope } from '../../components/ScopeToggle';
 import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
+import { colors, fontFamily } from '../../theme';
 export default function EventsScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
@@ -457,7 +458,7 @@ export default function EventsScreen({ navigation, route }: any) {
             <Image source={{ uri: item.image_url }} style={styles.eventBanner} />
           ) : (
             <View style={[styles.eventBanner, styles.placeholderBanner]}>
-              <Ionicons name="calendar" size={40} color="#94A3B8" />
+              <Ionicons name="calendar" size={40} color={colors.textTertiary} />
             </View>
           )}
         </TouchableOpacity>
@@ -472,7 +473,7 @@ export default function EventsScreen({ navigation, route }: any) {
             <Text style={styles.categoryBadgeText}>{item.category}</Text>
             {item.is_private && (
               <View style={styles.privateBadge}>
-                <Ionicons name="lock-closed" size={10} color="#64748B" />
+                <Ionicons name="lock-closed" size={10} color={colors.textSecondary} />
                 <Text style={styles.privateBadgeText}>Private</Text>
               </View>
             )}
@@ -487,7 +488,7 @@ export default function EventsScreen({ navigation, route }: any) {
             {displayAvatar ? (
               <Image source={{ uri: displayAvatar }} style={styles.hostAvatar} />
             ) : (
-              <Ionicons name={item.business ? "briefcase" : "person-circle"} size={20} color="#CBD5E1" style={{ marginRight: 6 }} />
+              <Ionicons name={item.business ? "briefcase" : "person-circle"} size={20} color={colors.borderStrong} style={{ marginRight: 6 }} />
             )}
             <Text style={styles.hostName}>Hosted by {displayName}</Text>
           </TouchableOpacity>
@@ -497,12 +498,12 @@ export default function EventsScreen({ navigation, route }: any) {
           </TouchableOpacity>
           
           <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={16} color="#64748B" />
+            <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
             <Text style={styles.infoText}>{day} @ {time}</Text>
           </View>
           
           <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#64748B" />
+            <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
             <Text style={styles.infoText}>{item.location}</Text>
             {item._distanceKm != null && (
               <Text style={styles.distanceBadge}>· {formatDistance(item._distanceKm)}</Text>
@@ -513,14 +514,14 @@ export default function EventsScreen({ navigation, route }: any) {
 
           <View style={styles.actionRow}>
             <View style={styles.attendeesContainer}>
-              <Ionicons name="people" size={18} color="#3B82F6" />
+              <Ionicons name="people" size={18} color={colors.accent} />
               <Text style={styles.attendeesText}>{item.rsvpCount} Attending</Text>
             </View>
             
             <View style={{ flexDirection: 'row' }}>
               {item.is_private && (
                 <TouchableOpacity style={styles.inviteButton} onPress={() => handleShareInvite(item)}>
-                  <Ionicons name="share-social" size={18} color="#64748B" />
+                  <Ionicons name="share-social" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
               
@@ -545,10 +546,10 @@ export default function EventsScreen({ navigation, route }: any) {
         <Text style={styles.navTitle}>Community Events</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => setShowFilters(!showFilters)} style={[styles.navIconButton, { marginRight: 10 }]}>
-            <Ionicons name={showFilters ? "funnel" : "funnel-outline"} size={24} color="#34C759" />
+            <Ionicons name={showFilters ? "funnel" : "funnel-outline"} size={24} color={colors.brand} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.navIconButton}>
-            <Ionicons name="add-circle" size={28} color="#34C759" />
+            <Ionicons name="add-circle" size={28} color={colors.brand} />
           </TouchableOpacity>
         </View>
       </View>
@@ -569,12 +570,12 @@ export default function EventsScreen({ navigation, route }: any) {
         <View style={styles.filterTrayContainer}>
           <View style={styles.filterInputsRow}>
             <View style={[styles.searchBoxWrapper, { marginRight: 8 }]}>
-              <Ionicons name="location-outline" size={16} color="#94A3B8" style={styles.searchIcon} />
-              <TextInput style={styles.traySearchInput} placeholder="Filter Location..." value={searchLocation} onChangeText={setSearchLocation} placeholderTextColor="#94A3B8" />
+              <Ionicons name="location-outline" size={16} color={colors.textTertiary} style={styles.searchIcon} />
+              <TextInput style={styles.traySearchInput} placeholder="Filter Location..." value={searchLocation} onChangeText={setSearchLocation} placeholderTextColor={colors.textTertiary} />
             </View>
             <View style={styles.searchBoxWrapper}>
-              <Ionicons name="calendar-outline" size={16} color="#94A3B8" style={styles.searchIcon} />
-              <TextInput style={styles.traySearchInput} placeholder="YYYY-MM-DD" value={searchDate} onChangeText={setSearchDate} placeholderTextColor="#94A3B8" />
+              <Ionicons name="calendar-outline" size={16} color={colors.textTertiary} style={styles.searchIcon} />
+              <TextInput style={styles.traySearchInput} placeholder="YYYY-MM-DD" value={searchDate} onChangeText={setSearchDate} placeholderTextColor={colors.textTertiary} />
             </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10 }}>
@@ -601,7 +602,7 @@ export default function EventsScreen({ navigation, route }: any) {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
           data={events}
@@ -613,11 +614,11 @@ export default function EventsScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           onEndReached={loadMoreEvents}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <View style={styles.emptyLayout}>
-                <Ionicons name="location-outline" size={60} color="#CBD5E1" />
+                <Ionicons name="location-outline" size={60} color={colors.borderStrong} />
                 <Text style={styles.emptyText}>Set your location on your profile to see events at home.</Text>
                 <TouchableOpacity style={styles.setLocationButton} onPress={() => navigation.navigate('Profile', { session })}>
                   <Text style={styles.setLocationButtonText}>Go to Profile</Text>
@@ -625,12 +626,12 @@ export default function EventsScreen({ navigation, route }: any) {
               </View>
             ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
               <View style={styles.emptyLayout}>
-                <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
+                <Ionicons name="navigate-outline" size={60} color={colors.borderStrong} />
                 <Text style={styles.emptyText}>Enable location access, or set your profile location, to see nearby events.</Text>
               </View>
             ) : (
               <View style={styles.emptyLayout}>
-                <Ionicons name="calendar-clear-outline" size={60} color="#CBD5E1" />
+                <Ionicons name="calendar-clear-outline" size={60} color={colors.borderStrong} />
                 <Text style={styles.emptyText}>
                   {scope === 'home' ? `No events found at home in ${myLocation}.` : scope === 'nearby' ? 'No events found nearby.' : 'No events match your criteria.'}
                 </Text>
@@ -652,7 +653,7 @@ export default function EventsScreen({ navigation, route }: any) {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Host an Event</Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
-                  <Ionicons name="close-circle" size={28} color="#64748B" />
+                  <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
@@ -668,7 +669,7 @@ export default function EventsScreen({ navigation, route }: any) {
                           style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
                           onPress={() => setPostingAsBusinessId(null)}
                         >
-                          <Ionicons name="person-circle" size={24} color={postingAsBusinessId === null ? "#34C759" : "#64748B"} />
+                          <Ionicons name="person-circle" size={24} color={postingAsBusinessId === null ? colors.brand : colors.textSecondary} />
                           <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>My Profile</Text>
                         </TouchableOpacity>
                         {ownedBusinesses.map((biz) => (
@@ -680,7 +681,7 @@ export default function EventsScreen({ navigation, route }: any) {
                             {biz.logo_url ? (
                               <Image source={{ uri: biz.logo_url }} style={{ width: 24, height: 24, borderRadius: 12 }} />
                             ) : (
-                              <Ionicons name="briefcase" size={24} color={postingAsBusinessId === biz.id ? "#34C759" : "#64748B"} />
+                              <Ionicons name="briefcase" size={24} color={postingAsBusinessId === biz.id ? colors.brand : colors.textSecondary} />
                             )}
                             <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>
                               {biz.name}
@@ -697,7 +698,7 @@ export default function EventsScreen({ navigation, route }: any) {
                     <Image source={{ uri: imageUri }} style={styles.selectedImage} />
                   ) : (
                     <>
-                      <Ionicons name="camera" size={32} color="#94A3B8" />
+                      <Ionicons name="camera" size={32} color={colors.textTertiary} />
                       <Text style={styles.imagePlaceholderText}>Add Event Banner</Text>
                     </>
                   )}
@@ -723,8 +724,8 @@ export default function EventsScreen({ navigation, route }: any) {
                   <Switch 
                     value={isPrivate} 
                     onValueChange={setIsPrivate} 
-                    trackColor={{ false: '#E2E8F0', true: '#34C759' }}
-                    thumbColor="#fff"
+                    trackColor={{ false: colors.border, true: colors.brand }}
+                    thumbColor={colors.white}
                   />
                 </View>
 
@@ -743,7 +744,7 @@ export default function EventsScreen({ navigation, route }: any) {
                       }
                     }}
                   >
-                    {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={20} color="#34C759" />}
+                    {capturingLocation ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={20} color={colors.brand} />}
                   </TouchableOpacity>
                 </View>
 
@@ -753,14 +754,14 @@ export default function EventsScreen({ navigation, route }: any) {
                 <Text style={styles.inputLabel}>Event Date & Time</Text>
                 <View style={styles.halfInputRow}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Date</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Date</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                         <DateTimePicker value={eventDate} mode="date" display="default" onChange={(e, d) => d && setEventDate(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowDatePicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatDate(eventDate)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatDate(eventDate)}</Text>
                       </TouchableOpacity>
                     )}
                     {showDatePicker && Platform.OS === 'android' && (
@@ -769,14 +770,14 @@ export default function EventsScreen({ navigation, route }: any) {
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Start Time</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Start Time</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                         <DateTimePicker value={eventTime} mode="time" display="default" onChange={(e, d) => d && setEventTime(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowTimePicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatTime(eventTime)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatTime(eventTime)}</Text>
                       </TouchableOpacity>
                     )}
                     {showTimePicker && Platform.OS === 'android' && (
@@ -786,7 +787,7 @@ export default function EventsScreen({ navigation, route }: any) {
                 </View>
 
                 <TouchableOpacity style={styles.publishButton} onPress={handleCreateEvent} disabled={uploading}>
-                  {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Publish Event</Text>}
+                  {uploading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishButtonText}>Publish Event</Text>}
                 </TouchableOpacity>
                 <View style={{ height: 40 }} />
                 
@@ -800,121 +801,121 @@ export default function EventsScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   navPanel: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 20, paddingBottom: 15,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0'
+    backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border
   },
-  navTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  navTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   navIconButton: { padding: 4 },
-  filterTrayContainer: { backgroundColor: '#fff', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  filterTrayContainer: { backgroundColor: colors.white, padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   filterInputsRow: { flexDirection: 'row', marginBottom: 4 },
-  searchBoxWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 10, paddingHorizontal: 12 },
+  searchBoxWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], borderRadius: 10, paddingHorizontal: 12 },
   searchIcon: { marginRight: 6 },
-  traySearchInput: { flex: 1, height: 40, fontSize: 13, color: '#1E293B', fontWeight: '500' },
-  filterCategoryPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: '#F1F5F9', marginRight: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  filterCategoryPillActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  filterCategoryText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
-  filterCategoryTextActive: { color: '#fff' },
+  traySearchInput: { flex: 1, height: 40, fontSize: 13, color: colors.textPrimary, fontFamily: fontFamily.medium },
+  filterCategoryPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.slate[100], marginRight: 8, borderWidth: 1, borderColor: colors.border },
+  filterCategoryPillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  filterCategoryText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  filterCategoryTextActive: { color: colors.white },
   clearFilterLink: { alignSelf: 'center', marginTop: 6, padding: 4 },
-  clearFilterLinkText: { fontSize: 12, color: '#EF4444', fontWeight: '700' },
+  clearFilterLinkText: { fontSize: 12, color: colors.danger, fontFamily: fontFamily.bold },
   tabContainer: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  tabButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: '#F1F5F9', marginRight: 10 },
-  tabButtonActive: { backgroundColor: '#1E293B' },
-  tabText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  tabTextActive: { color: '#fff' },
+  tabButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: colors.slate[100], marginRight: 10 },
+  tabButtonActive: { backgroundColor: colors.textPrimary },
+  tabText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  tabTextActive: { color: colors.white },
   eventCard: {
-    backgroundColor: '#fff', borderRadius: 16, marginBottom: 20, overflow: 'hidden',
+    backgroundColor: colors.white, borderRadius: 16, marginBottom: 20, overflow: 'hidden',
     elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8
   },
   eventBanner: { width: '100%', height: 160, resizeMode: 'cover' },
-  placeholderBanner: { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  placeholderBanner: { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   dateBadge: {
-    position: 'absolute', top: 12, right: 12, backgroundColor: '#fff',
+    position: 'absolute', top: 12, right: 12, backgroundColor: colors.white,
     borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center',
     shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3
   },
-  dateBadgeMonth: { fontSize: 11, fontWeight: '800', color: '#EF4444' },
-  dateBadgeDay: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
+  dateBadgeMonth: { fontSize: 11, fontFamily: fontFamily.extrabold, color: colors.danger },
+  dateBadgeDay: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   eventBody: { padding: 16 },
   cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  categoryBadgeText: { fontSize: 11, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase' },
-  privateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  privateBadgeText: { fontSize: 10, fontWeight: '700', color: '#64748B', marginLeft: 4 },
+  categoryBadgeText: { fontSize: 11, fontFamily: fontFamily.extrabold, color: colors.accent, textTransform: 'uppercase' },
+  privateBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  privateBadgeText: { fontSize: 10, fontFamily: fontFamily.bold, color: colors.textSecondary, marginLeft: 4 },
   hostRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   hostAvatar: { width: 20, height: 20, borderRadius: 10, marginRight: 6 },
-  hostName: { fontSize: 13, fontWeight: '600', color: '#64748B' },
-  eventTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 12 },
+  hostName: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary },
+  eventTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 12 },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  infoText: { fontSize: 14, fontWeight: '600', color: '#475569', marginLeft: 8 },
-  eventDescription: { fontSize: 14, color: '#64748B', marginTop: 12, lineHeight: 20 },
+  infoText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600], marginLeft: 8 },
+  eventDescription: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textSecondary, marginTop: 12, lineHeight: 20 },
   actionRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9'
+    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.slate[100]
   },
   attendeesContainer: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12
+    backgroundColor: colors.accentSubtle, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12
   },
-  attendeesText: { fontSize: 13, fontWeight: '700', color: '#3B82F6', marginLeft: 6 },
+  attendeesText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.accent, marginLeft: 6 },
   inviteButton: {
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: '#F8FAFC', paddingHorizontal: 14,
-    borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, paddingHorizontal: 14,
+    borderRadius: 12, marginRight: 8, borderWidth: 1, borderColor: colors.border
   },
-  rsvpButton: { backgroundColor: '#F1F5F9', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 },
-  rsvpButtonActive: { backgroundColor: '#34C759' },
-  rsvpText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
-  rsvpTextActive: { color: '#fff' },
+  rsvpButton: { backgroundColor: colors.slate[100], paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 },
+  rsvpButtonActive: { backgroundColor: colors.brand },
+  rsvpText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  rsvpTextActive: { color: colors.white },
   emptyLayout: { alignItems: 'center', marginTop: 80 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
-  setLocationButton: { backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
-  setLocationButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
+  emptyText: { color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
+  setLocationButton: { backgroundColor: colors.brand, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 },
+  setLocationButtonText: { color: colors.white, fontSize: 14, fontFamily: fontFamily.bold },
+  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.brandSubtle, borderWidth: 1, borderColor: colors.brandSubtleStrong, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  distanceBadge: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 4 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
-    backgroundColor: '#fff', borderTopLeftRadius: 28,
+    backgroundColor: colors.white, borderTopLeftRadius: 28,
     borderTopRightRadius: 28, padding: 24, maxHeight: '90%'
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   imageSelector: {
-    width: '100%', height: 140, backgroundColor: '#F8FAFC', borderRadius: 16,
-    borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1',
+    width: '100%', height: 140, backgroundColor: colors.backgroundMuted, borderRadius: 16,
+    borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong,
     justifyContent: 'center', alignItems: 'center', marginBottom: 20, overflow: 'hidden'
   },
   selectedImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imagePlaceholderText: { fontSize: 13, fontWeight: '600', color: '#94A3B8', marginTop: 8 },
+  imagePlaceholderText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textTertiary, marginTop: 8 },
   privacyToggleRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12,
-    marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, padding: 16, borderRadius: 12,
+    marginBottom: 16, borderWidth: 1, borderColor: colors.border
   },
-  privacyToggleTitle: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  privacyToggleSubtitle: { fontSize: 12, color: '#64748B', marginTop: 4 },
+  privacyToggleTitle: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  privacyToggleSubtitle: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   halfInputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  inputLabel: { fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 },
+  inputLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 },
   inputField: {
-    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border,
     borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 15, color: '#1E293B', marginBottom: 16
+    fontFamily: fontFamily.regular, fontSize: 15, color: colors.textPrimary, marginBottom: 16
   },
-  creationPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#F1F5F9', marginRight: 8, marginBottom: 4 },
-  creationPillActive: { backgroundColor: '#3B82F6' },
-  creationPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  creationPillTextActive: { color: '#fff' },
-  publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
-  publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  creationPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.slate[100], marginRight: 8, marginBottom: 4 },
+  creationPillActive: { backgroundColor: colors.accent },
+  creationPillText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  creationPillTextActive: { color: colors.white },
+  publishButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
+  publishButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
   identityPill: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 8, paddingHorizontal: 16,
-    backgroundColor: '#F8FAFC', borderRadius: 20,
-    marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, borderRadius: 20,
+    marginRight: 10, borderWidth: 1, borderColor: colors.border
   },
-  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
-  identityText: { fontSize: 14, fontWeight: '600', color: '#64748B', marginLeft: 8 },
-  identityTextActive: { color: '#34C759' }
+  identityPillActive: { backgroundColor: colors.brandSubtle, borderColor: colors.brand },
+  identityText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 8 },
+  identityTextActive: { color: colors.brand }
 });

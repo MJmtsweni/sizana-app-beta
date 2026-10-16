@@ -18,6 +18,7 @@ import { compressImage } from '../../lib/mediaCompression';
 import { withRetry } from '../../lib/network';
 import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 
+import { colors, fontFamily } from '../../theme';
 export default function ForumsScreen({ navigation, route, session: directSession }: any) {
   const session = route?.params?.session || directSession;
   const insets = useSafeAreaInsets();
@@ -411,7 +412,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
       <View style={styles.postCard}>
         <View style={styles.postHeader}>
           <TouchableOpacity style={styles.authorRow} activeOpacity={0.7} onPress={() => handleProfilePress(item)}>
-            {displayAvatar ? <Image source={{ uri: displayAvatar }} style={styles.avatarImage} /> : <Ionicons name={item.business ? "briefcase" : "person-circle"} size={40} color="#CBD5E1" />}
+            {displayAvatar ? <Image source={{ uri: displayAvatar }} style={styles.avatarImage} /> : <Ionicons name={item.business ? "briefcase" : "person-circle"} size={40} color={colors.borderStrong} />}
             <View style={styles.authorDetails}>
   {/* Name and Plus Button Container */}
   <View style={styles.nameRow}>
@@ -432,7 +433,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
           ]);
         }}
       >
-        <Ionicons name="add" size={14} color="#fff" />
+        <Ionicons name="add" size={14} color={colors.white} />
       </TouchableOpacity>
     )}
   </View>
@@ -460,7 +461,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
             <Ionicons
               name={item.isFollowing ? "notifications" : "notifications-outline"}
               size={16}
-              color={item.isFollowing ? "#fff" : "#34C759"}
+              color={item.isFollowing ? colors.white : colors.brand}
             />
           </TouchableOpacity>
         </View>
@@ -485,11 +486,11 @@ export default function ForumsScreen({ navigation, route, session: directSession
 
         <View style={styles.postFooter}>
           <TouchableOpacity style={styles.actionButton} onPress={() => toggleLike(item.id, item.isLiked)}>
-            <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={22} color={item.isLiked ? "#EF4444" : "#64748B"} />
+            <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={22} color={item.isLiked ? colors.danger : colors.textSecondary} />
             <Text style={styles.actionText}>{item.likesCount}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('Thread', { post: item, session })}>
-            <Ionicons name="chatbox-outline" size={20} color="#64748B" />
+            <Ionicons name="chatbox-outline" size={20} color={colors.textSecondary} />
             <Text style={styles.actionText}>{item.commentsCount}</Text>
           </TouchableOpacity>
         </View>
@@ -501,7 +502,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
     <View style={styles.mainContainer}>
       <View style={[styles.navPanel, { paddingTop: Math.max(insets.top, 45) }]}>
         <Text style={styles.navTitle}>Community Forums</Text>
-        <TouchableOpacity onPress={() => setCreateModalVisible(true)}><Ionicons name="create-outline" size={26} color="#34C759" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => setCreateModalVisible(true)}><Ionicons name="create-outline" size={26} color={colors.brand} /></TouchableOpacity>
       </View>
 
       <ScopeToggle
@@ -525,32 +526,32 @@ export default function ForumsScreen({ navigation, route, session: directSession
         refreshing={refreshing}
         onEndReached={loadMorePosts}
         onEndReachedThreshold={0.5}
-        ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
+        ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
         ListEmptyComponent={
           scope === 'home' && !myLocation ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
-              <Ionicons name="location-outline" size={60} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+              <Ionicons name="location-outline" size={60} color={colors.borderStrong} />
+              <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
                 Set your location on your profile to see posts at home.
               </Text>
               <TouchableOpacity
-                style={{ backgroundColor: '#34C759', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 }}
+                style={{ backgroundColor: colors.brand, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 16 }}
                 onPress={() => navigation.navigate('Profile', { session })}
               >
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Go to Profile</Text>
+                <Text style={{ color: colors.white, fontSize: 14, fontFamily: fontFamily.bold }}>Go to Profile</Text>
               </TouchableOpacity>
             </View>
           ) : scope === 'nearby' && !deviceCoords && !myLocation ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
-              <Ionicons name="navigate-outline" size={60} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+              <Ionicons name="navigate-outline" size={60} color={colors.borderStrong} />
+              <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
                 Enable location access, or set your profile location, to see nearby posts.
               </Text>
             </View>
           ) : scope === 'home' || scope === 'nearby' ? (
             <View style={{ alignItems: 'center', marginTop: 80 }}>
-              <Ionicons name="chatbubbles-outline" size={60} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
+              <Ionicons name="chatbubbles-outline" size={60} color={colors.borderStrong} />
+              <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}>
                 No posts found {scope === 'home' ? `at home in ${myLocation}` : 'nearby'} yet.
               </Text>
             </View>
@@ -564,7 +565,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent} keyboardVerticalOffset={60}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{editingPostId ? 'Edit Post' : 'Start a Topic'}</Text>
-                <TouchableOpacity onPress={() => { setCreateModalVisible(false); clearForm(); }}><Ionicons name="close-circle" size={28} color="#64748B" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setCreateModalVisible(false); clearForm(); }}><Ionicons name="close-circle" size={28} color={colors.textSecondary} /></TouchableOpacity>
               </View>
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
                 <Text style={styles.inputLabel}>Topic Category</Text>
@@ -577,7 +578,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TextInput style={[styles.titleInput, { flex: 1, marginRight: 8, marginBottom: 0 }]} value={newLocation} onChangeText={setNewLocation} placeholder="e.g. Ballito" />
                   <TouchableOpacity
-                    style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center' }}
+                    style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: colors.brandSubtle, borderWidth: 1, borderColor: colors.brandSubtleStrong, justifyContent: 'center', alignItems: 'center' }}
                     disabled={capturingLocation}
                     onPress={async () => {
                       const captured = await captureLocation();
@@ -588,7 +589,7 @@ export default function ForumsScreen({ navigation, route, session: directSession
                       }
                     }}
                   >
-                    {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={18} color="#34C759" />}
+                    {capturingLocation ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={18} color={colors.brand} />}
                   </TouchableOpacity>
                 </View>
                 <View style={{ height: 16 }} />
@@ -607,62 +608,62 @@ export default function ForumsScreen({ navigation, route, session: directSession
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F1F5F9' },
+  mainContainer: { flex: 1, backgroundColor: colors.slate[100] },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 15, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  navTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  postCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 15, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border },
+  navTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  postCard: { backgroundColor: colors.white, borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   postHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   authorRow: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   avatarImage: { width: 40, height: 40, borderRadius: 20 },
   authorDetails: { marginLeft: 10, flex: 1, minWidth: 0, justifyContent: 'center' },
-  postLocationText: { fontSize: 11, fontWeight: '600', color: '#94A3B8', marginTop: 2 },
-  authorName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  postTopicBadge: { fontSize: 11, fontWeight: '700', color: '#3B82F6', marginTop: 2 },
-  plusButton: { backgroundColor: '#34C759', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
-  postTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
-  postBodyText: { fontSize: 14, color: '#475569', lineHeight: 22 },
+  postLocationText: { fontSize: 11, fontFamily: fontFamily.semibold, color: colors.textTertiary, marginTop: 2 },
+  authorName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  postTopicBadge: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.accent, marginTop: 2 },
+  plusButton: { backgroundColor: colors.brand, width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  postTitle: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 6 },
+  postBodyText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], lineHeight: 22 },
   tagContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
-  tagPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 6, marginBottom: 4 },
-  tagText: { fontSize: 11, fontWeight: '700', color: '#64748B' },
-  mediaContainer: { width: '100%', height: 200, borderRadius: 12, marginTop: 12, overflow: 'hidden', backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  tagPill: { backgroundColor: colors.slate[100], paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 6, marginBottom: 4 },
+  tagText: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  mediaContainer: { width: '100%', height: 200, borderRadius: 12, marginTop: 12, overflow: 'hidden', backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   postMedia: { width: '100%', height: '100%', resizeMode: 'cover' },
-  postFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12, marginTop: 16 },
+  postFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.slate[100], paddingTop: 12, marginTop: 16 },
   actionButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginRight: 4 },
-  actionText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
+  actionText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
+  modalContent: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  topicPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
-  topicPillActive: { backgroundColor: '#3B82F6' },
-  topicText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  topicTextActive: { color: '#fff' },
-  inputLabel: { fontSize: 14, fontWeight: '700', color: '#334155', marginBottom: 8 },
-  titleInput: { fontSize: 16, color: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 8, marginBottom: 16 },
-  bodyInput: { fontSize: 15, color: '#334155', height: 80, textAlignVertical: 'top', marginBottom: 16 },
-  mediaSelectorBox: { height: 100, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
-  publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#F8FAFC', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
-  identityText: { fontSize: 14, fontWeight: '600', color: '#64748B', marginLeft: 8 },
-  identityTextActive: { color: '#34C759' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  topicPill: { backgroundColor: colors.slate[100], paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
+  topicPillActive: { backgroundColor: colors.accent },
+  topicText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  topicTextActive: { color: colors.white },
+  inputLabel: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.slate[700], marginBottom: 8 },
+  titleInput: { fontFamily: fontFamily.regular, fontSize: 16, color: colors.textPrimary, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8, marginBottom: 16 },
+  bodyInput: { fontFamily: fontFamily.regular, fontSize: 15, color: colors.slate[700], height: 80, textAlignVertical: 'top', marginBottom: 16 },
+  mediaSelectorBox: { height: 100, backgroundColor: colors.backgroundMuted, borderRadius: 16, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  publishButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  publishButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
+  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: colors.backgroundMuted, borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: colors.border },
+  identityPillActive: { backgroundColor: colors.brandSubtle, borderColor: colors.brand },
+  identityText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 8 },
+  identityTextActive: { color: colors.brand },
   postDateText: { 
   fontSize: 11, 
-  fontWeight: '600', 
-  color: '#94A3B8', 
+  fontFamily: fontFamily.semibold, 
+  color: colors.textTertiary, 
   marginLeft: 4 
 },
 followButton: {
     padding: 8,
     borderRadius: 20,
-    backgroundColor: '#F0FDF4',
+    backgroundColor: colors.brandSubtle,
     borderWidth: 1,
-    borderColor: '#DCFCE7',
+    borderColor: colors.brandSubtleStrong,
     marginLeft: 8
   },
-  followButtonActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
+  followButtonActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   nameRow: {
   flexDirection: 'row',
   alignItems: 'center',

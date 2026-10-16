@@ -16,6 +16,7 @@ import { signOutOfSocialProviders } from '../../lib/socialAuth';
 
 
 
+import { colors, fontFamily } from '../../theme';
 export default function ProfileScreen({ route, navigation }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
@@ -304,7 +305,7 @@ export default function ProfileScreen({ route, navigation }: any) {
             <Image source={{ uri: profile.avatar_url }} style={styles.metaAvatar} />
           ) : (
             <View style={[styles.metaAvatar, styles.metaAvatarPlaceholder]}>
-              <Ionicons name="person" size={9} color="#94A3B8" />
+              <Ionicons name="person" size={9} color={colors.textTertiary} />
             </View>
           )}
           <Text style={styles.activityMetaText}>{formatTime(item.created_at)}</Text>
@@ -343,7 +344,7 @@ export default function ProfileScreen({ route, navigation }: any) {
           {item.rater?.avatar_url ? (
             <Image source={{ uri: item.rater.avatar_url }} style={styles.raterAvatar} />
           ) : (
-            <Ionicons name="person-circle" size={36} color="#CBD5E1" />
+            <Ionicons name="person-circle" size={36} color={colors.borderStrong} />
           )}
           <View style={{ marginLeft: 10 }}>
             <Text style={styles.raterName}>{item.rater?.username || 'Community Member'}</Text>
@@ -356,7 +357,7 @@ export default function ProfileScreen({ route, navigation }: any) {
               key={star}
               name={item.score >= star ? "star" : "star-outline"}
               size={14}
-              color={item.score >= star ? "#F59E0B" : "#CBD5E1"}
+              color={item.score >= star ? colors.warning : colors.borderStrong}
             />
           ))}
         </View>
@@ -368,7 +369,7 @@ export default function ProfileScreen({ route, navigation }: any) {
   );
 
   if (loading && !profile) {
-    return <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>;
+    return <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>;
   }
 
   const joinedYear = profile?.created_at
@@ -376,10 +377,10 @@ export default function ProfileScreen({ route, navigation }: any) {
     : (session?.user?.created_at ? new Date(session.user.created_at).getFullYear() : null);
 
   const createActions = [
-    { key: 'Post', icon: 'chatbubbles' as const, color: '#3B82F6', bg: '#EFF6FF', screen: 'Forums' },
-    { key: 'Sell Item', icon: 'pricetag' as const, color: '#34C759', bg: '#F0FDF4', screen: 'Buy & Sell' },
-    { key: 'Event', icon: 'calendar' as const, color: '#EF4444', bg: '#FEF2F2', screen: 'Events' },
-    { key: 'Business', icon: 'briefcase' as const, color: '#F59E0B', bg: '#FFFBEB', screen: 'Business' },
+    { key: 'Post', icon: 'chatbubbles' as const, color: colors.accent, bg: colors.accentSubtle, screen: 'Forums' },
+    { key: 'Sell Item', icon: 'pricetag' as const, color: colors.brand, bg: colors.brandSubtle, screen: 'Buy & Sell' },
+    { key: 'Event', icon: 'calendar' as const, color: colors.danger, bg: colors.dangerSubtle, screen: 'Events' },
+    { key: 'Business', icon: 'briefcase' as const, color: colors.warning, bg: colors.warningSubtle, screen: 'Business' },
   ];
 
   return (
@@ -393,12 +394,12 @@ export default function ProfileScreen({ route, navigation }: any) {
               onPress={() => navigation.navigate('Friends', { session })} 
               style={{ padding: 4, marginRight: 12 }}
             >
-              <Ionicons name="people-outline" size={26} color="#1E293B" />
+              <Ionicons name="people-outline" size={26} color={colors.textPrimary} />
             </TouchableOpacity>
             
             {/* EXISTING: Settings Button */}
             <TouchableOpacity onPress={handleOpenSettings} style={{ padding: 4 }}>
-              <Ionicons name="settings-outline" size={24} color="#64748B" />
+              <Ionicons name="settings-outline" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -409,7 +410,7 @@ export default function ProfileScreen({ route, navigation }: any) {
               <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
             ) : (
               <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
-                <Ionicons name="person" size={40} color="#94A3B8" />
+                <Ionicons name="person" size={40} color={colors.textTertiary} />
               </View>
             )}
           </View>
@@ -426,8 +427,8 @@ export default function ProfileScreen({ route, navigation }: any) {
               )}
               {profile?.is_verified && (
                 <View style={[styles.trustBadge, styles.verifiedBadge]}>
-                  <Ionicons name="checkmark-circle" size={11} color="#34C759" style={{ marginRight: 3 }} />
-                  <Text style={[styles.trustBadgeText, { color: '#34C759' }]}>Verified Member</Text>
+                  <Ionicons name="checkmark-circle" size={11} color={colors.brand} style={{ marginRight: 3 }} />
+                  <Text style={[styles.trustBadgeText, { color: colors.brand }]}>Verified Member</Text>
                 </View>
               )}
               {joinedYear && (
@@ -439,7 +440,7 @@ export default function ProfileScreen({ route, navigation }: any) {
             
             {profile?.location && (
               <View style={styles.locationRow}>
-                <Ionicons name="location" size={14} color="#64748B" />
+                <Ionicons name="location" size={14} color={colors.textSecondary} />
                 <Text style={styles.locationText}>{profile.location}</Text>
               </View>
             )}
@@ -488,7 +489,7 @@ export default function ProfileScreen({ route, navigation }: any) {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
-              <Ionicons name="chatbubbles-outline" size={48} color="#CBD5E1" />
+              <Ionicons name="chatbubbles-outline" size={48} color={colors.borderStrong} />
               <Text style={styles.emptyText}>You haven't posted anything yet.</Text>
             </View>
           }
@@ -504,7 +505,7 @@ export default function ProfileScreen({ route, navigation }: any) {
           showsVerticalScrollIndicator={false} 
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
-              <Ionicons name="calendar-outline" size={48} color="#CBD5E1" />
+              <Ionicons name="calendar-outline" size={48} color={colors.borderStrong} />
               <Text style={styles.emptyText}>No upcoming RSVPs.</Text>
             </View>
           }
@@ -519,7 +520,7 @@ export default function ProfileScreen({ route, navigation }: any) {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
-              <Ionicons name="briefcase-outline" size={48} color="#CBD5E1" />
+              <Ionicons name="briefcase-outline" size={48} color={colors.borderStrong} />
               <Text style={styles.emptyText}>You haven't registered any businesses.</Text>
             </View>
           }
@@ -531,8 +532,8 @@ export default function ProfileScreen({ route, navigation }: any) {
                   {item.logo_url ? (
                     <Image source={{ uri: item.logo_url }} style={{ width: 40, height: 40, borderRadius: 8, marginRight: 12 }} />
                   ) : (
-                    <View style={{ width: 40, height: 40, borderRadius: 8, marginRight: 12, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' }}>
-                      <Ionicons name="briefcase" size={20} color="#94A3B8" />
+                    <View style={{ width: 40, height: 40, borderRadius: 8, marginRight: 12, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' }}>
+                      <Ionicons name="briefcase" size={20} color={colors.textTertiary} />
                     </View>
                   )}
                   <View style={{ flex: 1 }}>
@@ -554,7 +555,7 @@ export default function ProfileScreen({ route, navigation }: any) {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
-              <Ionicons name="pricetag-outline" size={48} color="#CBD5E1" />
+              <Ionicons name="pricetag-outline" size={48} color={colors.borderStrong} />
               <Text style={styles.emptyText}>You haven't listed any items.</Text>
             </View>
           }
@@ -577,7 +578,7 @@ export default function ProfileScreen({ route, navigation }: any) {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyLayout}>
-              <Ionicons name="star-outline" size={48} color="#CBD5E1" />
+              <Ionicons name="star-outline" size={48} color={colors.borderStrong} />
               <Text style={styles.emptyText}>You haven't received any reviews yet.</Text>
             </View>
           }
@@ -631,7 +632,7 @@ export default function ProfileScreen({ route, navigation }: any) {
             rotate: menuAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] })
           }]
         }}>
-          <Ionicons name="add" size={30} color="#fff" />
+          <Ionicons name="add" size={30} color={colors.white} />
         </Animated.View>
       </TouchableOpacity>
 
@@ -642,7 +643,7 @@ export default function ProfileScreen({ route, navigation }: any) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Profile</Text>
               <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                <Ionicons name="close-circle" size={28} color="#64748B" />
+                <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -653,11 +654,11 @@ export default function ProfileScreen({ route, navigation }: any) {
                     <Image source={{ uri: editAvatarUri }} style={styles.editAvatarImage} />
                   ) : (
                     <View style={[styles.editAvatarImage, styles.avatarPlaceholder]}>
-                      <Ionicons name="camera" size={32} color="#94A3B8" />
+                      <Ionicons name="camera" size={32} color={colors.textTertiary} />
                     </View>
                   )}
                   <View style={styles.editAvatarBadge}>
-                    <Ionicons name="pencil" size={12} color="#fff" />
+                    <Ionicons name="pencil" size={12} color={colors.white} />
                   </View>
                 </TouchableOpacity>
               </View>
@@ -681,12 +682,12 @@ export default function ProfileScreen({ route, navigation }: any) {
               <View style={{ marginTop: 8, marginBottom: 16 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <Text style={styles.inputLabel}>Regions of Interest</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#3B82F6' }}>{editRegions.length} / 3</Text>
+                  <Text style={{ fontSize: 12, fontFamily: fontFamily.bold, color: colors.accent }}>{editRegions.length} / 3</Text>
                 </View>
                 
                 {Object.entries(SA_REGIONS).map(([province, cities]) => (
                   <View key={province} style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 8 }}>{province}</Text>
+                    <Text style={{ fontSize: 12, fontFamily: fontFamily.extrabold, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: 8 }}>{province}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                       {cities.map((city) => {
                         const isActive = editRegions.includes(city);
@@ -697,7 +698,7 @@ export default function ProfileScreen({ route, navigation }: any) {
                             onPress={() => toggleEditRegion(city)}
                           >
                             <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{city}</Text>
-                            {isActive && <Ionicons name="close" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                            {isActive && <Ionicons name="close" size={14} color={colors.white} style={{ marginLeft: 6 }} />}
                           </TouchableOpacity>
                         );
                       })}
@@ -719,7 +720,7 @@ export default function ProfileScreen({ route, navigation }: any) {
                         onPress={() => toggleEditInterest(topic)}
                       >
                         <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{topic}</Text>
-                        {isActive && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                        {isActive && <Ionicons name="checkmark" size={14} color={colors.white} style={{ marginLeft: 6 }} />}
                       </TouchableOpacity>
                     );
                   })}
@@ -727,7 +728,7 @@ export default function ProfileScreen({ route, navigation }: any) {
               </View>
 
               <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
+                {saving ? <ActivityIndicator color={colors.white} /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
               </TouchableOpacity>
               <View style={{ height: 40 }} />
             </ScrollView>
@@ -739,12 +740,12 @@ export default function ProfileScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
-  headerBackground: { backgroundColor: '#fff', paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  headerBackground: { backgroundColor: colors.white, paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  headerTitle: { fontSize: 24, fontWeight: '800', color: '#1E293B' },
+  headerTitle: { fontSize: 24, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   
   profileInfoContainer: { flexDirection: 'row', alignItems: 'flex-start' },
 
@@ -756,79 +757,79 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
-  avatarImage: { width: 84, height: 84, borderRadius: 42, borderWidth: 3, borderColor: '#fff' },
-  avatarPlaceholder: { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
+  avatarImage: { width: 84, height: 84, borderRadius: 42, borderWidth: 3, borderColor: colors.white },
+  avatarPlaceholder: { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
   
-  usernameText: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  usernameText: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
 
   trustBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, marginBottom: 4 },
   trustBadge: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border,
     borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4,
     marginRight: 6, marginBottom: 6,
   },
-  verifiedBadge: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
-  trustBadgeText: { fontSize: 11, fontWeight: '700', color: '#475569' },
+  verifiedBadge: { backgroundColor: colors.brandSubtle, borderColor: colors.brandSubtleStrong },
+  trustBadgeText: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.slate[600] },
 
   locationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  locationText: { fontSize: 13, color: '#64748B', marginLeft: 4, fontWeight: '500' },
-  bioText: { fontSize: 14, color: '#475569', marginTop: 8, lineHeight: 20 },
+  locationText: { fontSize: 13, color: colors.textSecondary, marginLeft: 4, fontFamily: fontFamily.medium },
+  bioText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], marginTop: 8, lineHeight: 20 },
   
-  editProfileBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#F1F5F9', borderRadius: 20, alignSelf: 'flex-start' },
-  editProfileBtnText: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
+  editProfileBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: colors.slate[100], borderRadius: 20, alignSelf: 'flex-start' },
+  editProfileBtnText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textPrimary },
 
-  tabContainer: { backgroundColor: '#F8FAFC', height: 54, flexShrink: 0 },
+  tabContainer: { backgroundColor: colors.backgroundMuted, height: 54, flexShrink: 0 },
   tabContentRow: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, alignItems: 'center' },
   tabButton: { alignItems: 'center', marginRight: 24 },
-  tabText: { fontSize: 14, fontWeight: '700', color: '#94A3B8' },
-  tabTextActive: { color: '#34C759' },
-  activeIndicator: { marginTop: 9, height: 3, width: '100%', borderRadius: 2, backgroundColor: '#34C759' },
+  tabText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textTertiary },
+  tabTextActive: { color: colors.brand },
+  activeIndicator: { marginTop: 9, height: 3, width: '100%', borderRadius: 2, backgroundColor: colors.brand },
 
   activityCard: {
-    backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16, marginBottom: 12,
+    backgroundColor: colors.white, padding: 16, borderRadius: 16, marginBottom: 12,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  activityTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 8 },
+  activityTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: 8 },
   activityMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  activityBadge: { fontSize: 10, fontWeight: '800', color: '#34C759', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
-  activityMetaText: { fontSize: 12, color: '#94A3B8', fontWeight: '600' },
+  activityBadge: { fontSize: 10, fontFamily: fontFamily.extrabold, color: colors.brand, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
+  activityMetaText: { fontSize: 12, color: colors.textTertiary, fontFamily: fontFamily.semibold },
 
   metaAuthorRow: { flexDirection: 'row', alignItems: 'center' },
   metaAvatar: { width: 18, height: 18, borderRadius: 9, marginRight: 6 },
-  metaAvatarPlaceholder: { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },
-  commentCluster: { fontSize: 12, color: '#94A3B8', fontWeight: '700' },
+  metaAvatarPlaceholder: { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' },
+  commentCluster: { fontSize: 12, color: colors.textTertiary, fontFamily: fontFamily.bold },
   
-  eventDateBox: { backgroundColor: '#F0FDF4', padding: 10, borderRadius: 12, alignItems: 'center', justifyContent: 'center', minWidth: 60 },
-  eventDateText: { fontSize: 12, fontWeight: '800', color: '#34C759', textAlign: 'center' },
+  eventDateBox: { backgroundColor: colors.brandSubtle, padding: 10, borderRadius: 12, alignItems: 'center', justifyContent: 'center', minWidth: 60 },
+  eventDateText: { fontSize: 12, fontFamily: fontFamily.extrabold, color: colors.brand, textAlign: 'center' },
 
   // --- NEW REVIEW STYLES ---
   reviewCard: {
-    backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 12,
-    borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: colors.white, padding: 16, borderRadius: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: colors.border,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 2,
   },
   reviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   raterInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   raterAvatar: { width: 36, height: 36, borderRadius: 18 },
-  raterName: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  reviewDate: { fontSize: 12, color: '#94A3B8', marginTop: 2, fontWeight: '500' },
+  raterName: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  reviewDate: { fontSize: 12, color: colors.textTertiary, marginTop: 2, fontFamily: fontFamily.medium },
   starsRow: { flexDirection: 'row', marginTop: 2 },
-  reviewComment: { fontSize: 14, color: '#475569', marginTop: 8, lineHeight: 22 },
+  reviewComment: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], marginTop: 8, lineHeight: 22 },
 
   emptyLayout: { alignItems: 'center', marginTop: 60 },
-  emptyText: { color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 12 },
+  emptyText: { color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginTop: 12 },
 
   // FAB
   fabBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.35)' },
   fabMain: {
     position: 'absolute', right: 20, width: 58, height: 58, borderRadius: 29,
-    backgroundColor: '#34C759', justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 8,
+    backgroundColor: colors.brand, justifyContent: 'center', alignItems: 'center',
+    shadowColor: colors.brand, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 8,
   },
   fabMiniWrap: { position: 'absolute', right: 24, flexDirection: 'row', alignItems: 'center' },
   fabMiniLabel: {
-    backgroundColor: '#1E293B', color: '#fff', fontSize: 12, fontWeight: '700',
+    backgroundColor: colors.textPrimary, color: colors.white, fontSize: 12, fontFamily: fontFamily.bold,
     paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginRight: 10, overflow: 'hidden',
   },
   fabMiniButton: {
@@ -838,22 +839,22 @@ const styles = StyleSheet.create({
 
   // Modal Styling
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
+  modalContent: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   
   editAvatarContainer: { alignItems: 'center', marginBottom: 24 },
   editAvatarWrapper: { position: 'relative' },
   editAvatarImage: { width: 100, height: 100, borderRadius: 50 },
-  editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#3B82F6', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  editAvatarBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: colors.accent, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.white },
 
-  inputLabel: { fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 },
-  inputField: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: '#1E293B', marginBottom: 16 },
+  inputLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 },
+  inputField: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontFamily: fontFamily.regular, fontSize: 15, color: colors.textPrimary, marginBottom: 16 },
   
-  saveButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
-  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-  pillActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  pillText: { fontSize: 13, fontWeight: '600', color: '#475569' },
-  pillTextActive: { color: '#fff' }
+  saveButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
+  saveButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
+  pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
+  pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  pillText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.slate[600] },
+  pillTextActive: { color: colors.white }
 });

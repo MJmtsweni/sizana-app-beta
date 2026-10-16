@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase';
 import EditBusinessModalScreen from './EditBusinessModalScreen';
 import ListingDetailsModal from './ListingDetailsModal';
 
+import { colors, fontFamily } from '../../theme';
 export default function BusinessProfileScreen({ navigation, route }: any) {
   const { business, session } = route.params;
   const insets = useSafeAreaInsets();
@@ -265,21 +266,21 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
       
       <View style={styles.infoCard}>
         <TouchableOpacity style={styles.infoRow} onPress={handleDirections}>
-          <Ionicons name="location" size={20} color="#64748B" />
+          <Ionicons name="location" size={20} color={colors.textSecondary} />
           <Text style={styles.infoText}>{currentBusiness.location}</Text>
         </TouchableOpacity>
         
         {currentBusiness.contact_email && (
           <TouchableOpacity style={styles.infoRow} onPress={() => handleEmail(currentBusiness.contact_email)}>
-            <Ionicons name="mail" size={20} color="#34C759" />
-            <Text style={[styles.infoText, { color: '#34C759' }]}>{currentBusiness.contact_email}</Text>
+            <Ionicons name="mail" size={20} color={colors.brand} />
+            <Text style={[styles.infoText, { color: colors.brand }]}>{currentBusiness.contact_email}</Text>
           </TouchableOpacity>
         )}
 
         {currentBusiness.whatsapp_number && (
           <TouchableOpacity style={styles.infoRow} onPress={() => handleWhatsApp(currentBusiness.whatsapp_number)}>
-            <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
-            <Text style={[styles.infoText, { color: '#25D366' }]}>{currentBusiness.whatsapp_number}</Text>
+            <Ionicons name="logo-whatsapp" size={20} color={colors.whatsapp} />
+            <Text style={[styles.infoText, { color: colors.whatsapp }]}>{currentBusiness.whatsapp_number}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -302,7 +303,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
     <View style={styles.tabContentContainer}>
       {listings.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="briefcase-outline" size={48} color="#CBD5E1" />
+          <Ionicons name="briefcase-outline" size={48} color={colors.borderStrong} />
           <Text style={styles.emptyStateText}>No open positions right now.</Text>
         </View>
       ) : (
@@ -318,7 +319,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
                 {(item.image_urls?.[0] || item.image_url) ? (
                   <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.listingGridImage} />
                 ) : (
-                  <Ionicons name="briefcase" size={32} color="#CBD5E1" />
+                  <Ionicons name="briefcase" size={32} color={colors.borderStrong} />
                 )}
               </View>
               <View style={{ padding: 10 }}>
@@ -341,11 +342,11 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
             <Image source={{ uri: currentBusiness.cover_photo_url }} style={styles.coverPhoto} />
           ) : (
             <View style={[styles.coverPhoto, styles.coverPhotoPlaceholder]}>
-              <Ionicons name="image-outline" size={36} color="#CBD5E1" />
+              <Ionicons name="image-outline" size={36} color={colors.borderStrong} />
             </View>
           )}
           <TouchableOpacity style={[styles.backButton, { top: Math.max(insets.top, 20) }]} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={colors.white} />
           </TouchableOpacity>
         </View>
 
@@ -355,7 +356,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
             {currentBusiness.logo_url ? (
               <Image source={{ uri: currentBusiness.logo_url }} style={styles.logoImage} />
             ) : (
-              <Ionicons name="briefcase" size={32} color="#CBD5E1" />
+              <Ionicons name="briefcase" size={32} color={colors.borderStrong} />
             )}
           </View>
           <Text style={styles.businessName}>{currentBusiness.name}</Text>
@@ -371,13 +372,13 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
                 onPress={toggleFollow}
                 disabled={loadingFollow}
               >
-                <Text style={[styles.actionButtonText, isFollowing && { color: '#1E293B' }]}>
+                <Text style={[styles.actionButtonText, isFollowing && { color: colors.textPrimary }]}>
                   {isFollowing ? 'Following' : 'Follow'}
                 </Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity style={[styles.actionButton, styles.buttonSecondary]} onPress={() => setEditModalVisible(true)}>
-                <Text style={[styles.actionButtonText, { color: '#1E293B' }]}>Edit Page</Text>
+                <Text style={[styles.actionButtonText, { color: colors.textPrimary }]}>Edit Page</Text>
               </TouchableOpacity>
             )}
 
@@ -397,7 +398,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
                   })
                 }
               >
-                <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
+                <Ionicons name="chatbubble-ellipses" size={16} color={colors.white} />
                 <Text style={styles.actionButtonText}>Message</Text>
               </TouchableOpacity>
             )}
@@ -406,13 +407,13 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
           {/* Secondary actions — quick-contact icons, one clear row of their own */}
           <View style={styles.secondaryActionRow}>
             <TouchableOpacity style={styles.iconButton} onPress={() => setReviewModalVisible(true)}>
-              <Ionicons name="star" size={20} color="#F59E0B" />
+              <Ionicons name="star" size={20} color={colors.warning} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={() => handleWhatsApp(currentBusiness.whatsapp_number)}>
-              <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+              <Ionicons name="logo-whatsapp" size={20} color={colors.whatsapp} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconButton} onPress={() => handleEmail(currentBusiness.contact_email)}>
-              <Ionicons name="mail" size={20} color="#34C759" />
+              <Ionicons name="mail" size={20} color={colors.brand} />
             </TouchableOpacity>
           </View>
         </View>
@@ -431,10 +432,10 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
           {activeTab === 'About' && renderAboutTab()}
           {activeTab === 'Gallery' && renderGalleryTab()}
           {activeTab === 'Posts' && (
-            loadingContent ? <ActivityIndicator color="#34C759" style={{ marginTop: 40 }} /> :
+            loadingContent ? <ActivityIndicator color={colors.brand} style={{ marginTop: 40 }} /> :
             posts.length === 0 ? (
               <View style={styles.emptyState}>
-                <Ionicons name="newspaper-outline" size={48} color="#CBD5E1" />
+                <Ionicons name="newspaper-outline" size={48} color={colors.borderStrong} />
                 <Text style={styles.emptyStateText}>No posts yet.</Text>
               </View>
             ) : posts.map(p => (
@@ -444,10 +445,10 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
             ))
           )}
           {activeTab === 'Events' && (
-            loadingContent ? <ActivityIndicator color="#34C759" style={{ marginTop: 40 }} /> :
+            loadingContent ? <ActivityIndicator color={colors.brand} style={{ marginTop: 40 }} /> :
             events.length === 0 ? (
               <View style={styles.emptyState}>
-                <Ionicons name="calendar-outline" size={48} color="#CBD5E1" />
+                <Ionicons name="calendar-outline" size={48} color={colors.borderStrong} />
                 <Text style={styles.emptyStateText}>No upcoming events.</Text>
               </View>
             ) : events.map(e => (
@@ -457,7 +458,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
             ))
           )}
           {activeTab === 'Jobs' && (
-            loadingContent ? <ActivityIndicator color="#34C759" style={{ marginTop: 40 }} /> : renderListingsTab()
+            loadingContent ? <ActivityIndicator color={colors.brand} style={{ marginTop: 40 }} /> : renderListingsTab()
           )}
         </View>
       </ScrollView>
@@ -473,7 +474,7 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
       <Modal visible={!!selectedImage} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
         <View style={styles.fullScreenOverlay}>
           <TouchableOpacity style={[styles.closeImageButton, { top: Math.max(insets.top, 20) }]} onPress={() => setSelectedImage(null)}>
-            <Ionicons name="close" size={28} color="#fff" />
+            <Ionicons name="close" size={28} color={colors.white} />
           </TouchableOpacity>
           {selectedImage && <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain" />}
         </View>
@@ -485,11 +486,11 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Rate this Business</Text>
               <TouchableOpacity onPress={() => setReviewModalVisible(false)}>
-                <Ionicons name="close-circle" size={28} color="#64748B" />
+                <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            <Text style={{ fontSize: 14, color: '#475569', marginBottom: 20, textAlign: 'center' }}>
+            <Text style={{ fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], marginBottom: 20, textAlign: 'center' }}>
               How was your experience with {currentBusiness.name}?
             </Text>
 
@@ -500,28 +501,28 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
                   <Ionicons 
                     name={reviewScore >= star ? "star" : "star-outline"} 
                     size={40} 
-                    color={reviewScore >= star ? "#F59E0B" : "#CBD5E1"} 
+                    color={reviewScore >= star ? colors.warning : colors.borderStrong} 
                   />
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 }}>Add a comment (Optional)</Text>
+            <Text style={{ fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 }}>Add a comment (Optional)</Text>
             <TextInput
-              style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: '#1E293B', height: 100, textAlignVertical: 'top', marginBottom: 24 }}
+              style={{ backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontFamily: fontFamily.regular, fontSize: 15, color: colors.textPrimary, height: 100, textAlignVertical: 'top', marginBottom: 24 }}
               placeholder="Tell the community what you loved..."
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={colors.textTertiary}
               multiline
               value={reviewComment}
               onChangeText={setReviewComment}
             />
 
             <TouchableOpacity 
-              style={{ backgroundColor: reviewScore > 0 ? '#34C759' : '#CBD5E1', paddingVertical: 16, borderRadius: 16, alignItems: 'center' }} 
+              style={{ backgroundColor: reviewScore > 0 ? colors.brand : colors.borderStrong, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }} 
               onPress={handleSubmitReview}
               disabled={reviewScore === 0 || submittingReview}
             >
-              {submittingReview ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Submit Review</Text>}
+              {submittingReview ? <ActivityIndicator color={colors.white} /> : <Text style={{ color: colors.white, fontSize: 16, fontFamily: fontFamily.bold }}>Submit Review</Text>}
             </TouchableOpacity>
           </KeyboardAvoidingView>
         </View>
@@ -540,76 +541,76 @@ export default function BusinessProfileScreen({ navigation, route }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#fff' },
+  mainContainer: { flex: 1, backgroundColor: colors.white },
   coverPhotoContainer: { width: '100%', height: 180, position: 'relative' },
   coverPhoto: { width: '100%', height: '100%', resizeMode: 'cover' },
-  coverPhotoPlaceholder: { backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  coverPhotoPlaceholder: { backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' },
   backButton: {
     position: 'absolute', left: 16, width: 40, height: 40, borderRadius: 20,
     backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center'
   },
   profileMetaContainer: { paddingHorizontal: 16, marginTop: -40 },
   logoWrapper: {
-    width: 80, height: 80, borderRadius: 16, backgroundColor: '#fff',
+    width: 80, height: 80, borderRadius: 16, backgroundColor: colors.white,
     justifyContent: 'center', alignItems: 'center', elevation: 4,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4,
-    borderWidth: 3, borderColor: '#fff'
+    borderWidth: 3, borderColor: colors.white
   },
   logoImage: { width: '100%', height: '100%', borderRadius: 13, resizeMode: 'cover' },
-  businessName: { fontSize: 24, fontWeight: '800', color: '#1E293B', marginTop: 12 },
-  categoryText: { fontSize: 14, color: '#64748B', marginTop: 4, fontWeight: '500' },
+  businessName: { fontSize: 24, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginTop: 12 },
+  categoryText: { fontSize: 14, color: colors.textSecondary, marginTop: 4, fontFamily: fontFamily.medium },
   primaryActionRow: {
     flexDirection: 'row', alignItems: 'center', marginTop: 16,
   },
   secondaryActionRow: {
     flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingBottom: 16,
-    borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
+    borderBottomWidth: 1, borderBottomColor: colors.slate[100],
   },
   actionButton: {
     flex: 1, flexDirection: 'row', height: 44, borderRadius: 22,
     justifyContent: 'center', alignItems: 'center', marginRight: 12
   },
-  buttonPrimary: { backgroundColor: '#34C759' },
-  buttonFollowing: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
-  buttonSecondary: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' },
-  actionButtonText: { color: '#fff', fontSize: 15, fontWeight: '700', marginLeft: 6 },
-  iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  tabsContainer: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  buttonPrimary: { backgroundColor: colors.brand },
+  buttonFollowing: { backgroundColor: colors.slate[100], borderWidth: 1, borderColor: colors.border },
+  buttonSecondary: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border },
+  actionButtonText: { color: colors.white, fontSize: 15, fontFamily: fontFamily.bold, marginLeft: 6 },
+  iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  tabsContainer: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
   tab: { flex: 1, paddingVertical: 16, alignItems: 'center' },
-  activeTab: { borderBottomWidth: 2, borderBottomColor: '#34C759' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
-  activeTabText: { color: '#34C759', fontWeight: '800' },
+  activeTab: { borderBottomWidth: 2, borderBottomColor: colors.brand },
+  tabText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textSecondary },
+  activeTabText: { color: colors.brand, fontFamily: fontFamily.extrabold },
   contentArea: { padding: 16, minHeight: 400 },
   tabContentContainer: { flex: 1 },
-  sectionHeader: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 12 },
-  descriptionText: { fontSize: 15, color: '#475569', lineHeight: 24, marginBottom: 24 },
-  infoCard: { backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E2E8F0' },
+  sectionHeader: { fontSize: 18, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: 12 },
+  descriptionText: { fontFamily: fontFamily.regular, fontSize: 15, color: colors.slate[600], lineHeight: 24, marginBottom: 24 },
+  infoCard: { backgroundColor: colors.backgroundMuted, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  infoText: { fontSize: 15, color: '#1E293B', marginLeft: 12, flex: 1 },
+  infoText: { fontFamily: fontFamily.regular, fontSize: 15, color: colors.textPrimary, marginLeft: 12, flex: 1 },
   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   galleryItem: { width: '48%', marginBottom: 16 },
-  galleryImage: { width: '100%', height: 150, borderRadius: 12, backgroundColor: '#F1F5F9' },
+  galleryImage: { width: '100%', height: 150, borderRadius: 12, backgroundColor: colors.slate[100] },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
-  emptyStateText: { fontSize: 15, color: '#94A3B8', marginTop: 12, fontWeight: '500' },
+  emptyStateText: { fontSize: 15, color: colors.textTertiary, marginTop: 12, fontFamily: fontFamily.medium },
   postItem: {
-    backgroundColor: '#F8FAFC', padding: 16, borderRadius: 12,
-    marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0'
+    backgroundColor: colors.backgroundMuted, padding: 16, borderRadius: 12,
+    marginBottom: 12, borderWidth: 1, borderColor: colors.border
   },
-  postTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 4 },
+  postTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: 4 },
   eventItem: {
-    backgroundColor: '#F0FDF4', padding: 16, borderRadius: 12,
-    marginBottom: 12, borderWidth: 1, borderColor: '#DCFCE7'
+    backgroundColor: colors.brandSubtle, padding: 16, borderRadius: 12,
+    marginBottom: 12, borderWidth: 1, borderColor: colors.brandSubtleStrong
   },
-  eventTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 4 },
+  eventTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: 4 },
   listingsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   listingGridItem: {
-    width: '48%', backgroundColor: '#fff', borderRadius: 16, marginBottom: 16,
-    overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0'
+    width: '48%', backgroundColor: colors.white, borderRadius: 16, marginBottom: 16,
+    overflow: 'hidden', borderWidth: 1, borderColor: colors.border
   },
-  listingGridImageWrap: { width: '100%', height: 100, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  listingGridImageWrap: { width: '100%', height: 100, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' },
   listingGridImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  listingGridPrice: { fontSize: 14, fontWeight: '800', color: '#1E293B' },
-  listingGridTitle: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 2 },
+  listingGridPrice: { fontSize: 14, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  listingGridTitle: { fontSize: 12, color: colors.textSecondary, fontFamily: fontFamily.semibold, marginTop: 2 },
   fullScreenOverlay: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   fullScreenImage: { width: '100%', height: '100%' },
   closeImageButton: {
@@ -625,7 +626,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end' 
   },
   modalContent: { 
-    backgroundColor: '#fff', 
+    backgroundColor: colors.white, 
     borderTopLeftRadius: 28, 
     borderTopRightRadius: 28, 
     padding: 24, 
@@ -643,7 +644,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: { 
     fontSize: 20, 
-    fontWeight: '800', 
-    color: '#1E293B' 
+    fontFamily: fontFamily.extrabold, 
+    color: colors.textPrimary 
   },
 });

@@ -14,6 +14,7 @@ import { withRetry } from '../../lib/network';
 import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 import { CategoryPicker, EmptyState } from '../../components/ui';
 
+import { colors, fontFamily } from '../../theme';
 const { width } = Dimensions.get('window');
 const COLUMN_WIDTH = (width - 40) / 2;
 
@@ -377,7 +378,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           <Image source={{ uri: item.image_urls?.[0] || item.image_url }} style={styles.cardImage} />
         ) : (
           <View style={styles.placeholderImage}>
-            <Ionicons name="image-outline" size={40} color="#CBD5E1" />
+            <Ionicons name="image-outline" size={40} color={colors.borderStrong} />
           </View>
         )}
         <View style={styles.categoryBadge}>
@@ -385,12 +386,12 @@ export default function MarketScreen({ route, session: directSession, navigation
         </View>
         {item.business_id && (
           <View style={styles.businessBadge}>
-            <Ionicons name="briefcase" size={10} color="#fff" />
+            <Ionicons name="briefcase" size={10} color={colors.white} />
           </View>
         )}
         {item.image_urls?.length > 1 && (
           <View style={styles.photoCountBadge}>
-            <Ionicons name="images" size={10} color="#fff" />
+            <Ionicons name="images" size={10} color={colors.white} />
             <Text style={styles.photoCountText}>{item.image_urls.length}</Text>
           </View>
         )}
@@ -402,7 +403,7 @@ export default function MarketScreen({ route, session: directSession, navigation
         </Text>
         <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
         <View style={styles.locationContainer}>
-          <Ionicons name="location" size={12} color="#34C759" />
+          <Ionicons name="location" size={12} color={colors.brand} />
           <Text style={styles.cardLocation} numberOfLines={1}>{item.location}</Text>
         </View>
       </View>
@@ -431,7 +432,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                 style={[styles.typeTab, active && styles.typeTabActive]}
                 onPress={() => handleSelectListingType(item.key)}
               >
-                <Ionicons name={item.icon} size={16} color={active ? '#fff' : '#475569'} style={{ marginRight: 6 }} />
+                <Ionicons name={item.icon} size={16} color={active ? colors.white : colors.slate[600]} style={{ marginRight: 6 }} />
                 <Text style={[styles.typeTabText, active && styles.typeTabTextActive]}>{item.label}</Text>
               </TouchableOpacity>
             );
@@ -441,7 +442,7 @@ export default function MarketScreen({ route, session: directSession, navigation
 
       <View style={styles.filterHeaderLayout}>
         <View style={[styles.searchBarContainer, { flex: 1, marginRight: 6 }]}>
-          <Ionicons name="search" size={18} color="#94A3B8" style={styles.searchIcon} />
+          <Ionicons name="search" size={18} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder={`Search ${LISTING_TYPES.find(t => t.key === listingType)?.label.toLowerCase()}...`}
@@ -450,7 +451,7 @@ export default function MarketScreen({ route, session: directSession, navigation
           />
         </View>
         <View style={[styles.searchBarContainer, { width: '38%', marginLeft: 6 }]}>
-          <Ionicons name="location" size={18} color="#34C759" style={styles.searchIcon} />
+          <Ionicons name="location" size={18} color={colors.brand} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Location..."
@@ -469,7 +470,7 @@ export default function MarketScreen({ route, session: directSession, navigation
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
           data={filteredListings}
@@ -479,10 +480,10 @@ export default function MarketScreen({ route, session: directSession, navigation
           renderItem={renderMarketItem}
           contentContainerStyle={styles.gridContainer}
           columnWrapperStyle={styles.gridColumnWrapper}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#34C759']} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.brand]} />}
           onEndReached={loadMoreListings}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             <EmptyState
               icon="alert-circle-outline"
@@ -493,7 +494,7 @@ export default function MarketScreen({ route, session: directSession, navigation
       )}
 
       <TouchableOpacity style={styles.fab} activeOpacity={0.8} onPress={openCreateModal}>
-        <Ionicons name="add" size={24} color="#fff" />
+        <Ionicons name="add" size={24} color={colors.white} />
         <Text style={styles.fabText}>{FAB_LABEL[listingType]}</Text>
       </TouchableOpacity>
 
@@ -510,7 +511,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                 {editingItemId ? 'Edit Listing' : `New ${LISTING_TYPES.find(t => t.key === creatingListingType)?.label.slice(0, -1)}`}
               </Text>
               <TouchableOpacity onPress={() => { setModalVisible(false); clearForm(); }}>
-                <Ionicons name="close-circle" size={28} color="#64748B" />
+                <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -524,7 +525,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                       style={[styles.identityPill, postingAsBusinessId === null && styles.identityPillActive]}
                       onPress={() => setPostingAsBusinessId(null)}
                     >
-                      <Ionicons name="person" size={14} color={postingAsBusinessId === null ? '#34C759' : '#64748B'} />
+                      <Ionicons name="person" size={14} color={postingAsBusinessId === null ? colors.brand : colors.textSecondary} />
                       <Text style={[styles.identityText, postingAsBusinessId === null && styles.identityTextActive]}>Myself</Text>
                     </TouchableOpacity>
                     {ownedBusinesses.map((biz) => (
@@ -533,7 +534,7 @@ export default function MarketScreen({ route, session: directSession, navigation
                         style={[styles.identityPill, postingAsBusinessId === biz.id && styles.identityPillActive]}
                         onPress={() => setPostingAsBusinessId(biz.id)}
                       >
-                        <Ionicons name="briefcase" size={14} color={postingAsBusinessId === biz.id ? '#34C759' : '#64748B'} />
+                        <Ionicons name="briefcase" size={14} color={postingAsBusinessId === biz.id ? colors.brand : colors.textSecondary} />
                         <Text style={[styles.identityText, postingAsBusinessId === biz.id && styles.identityTextActive]}>{biz.name}</Text>
                       </TouchableOpacity>
                     ))}
@@ -554,17 +555,17 @@ export default function MarketScreen({ route, session: directSession, navigation
                       </View>
                     )}
                     <TouchableOpacity style={styles.removePhotoButton} onPress={() => handleRemoveImage(index)}>
-                      <Ionicons name="close" size={14} color="#fff" />
+                      <Ionicons name="close" size={14} color={colors.white} />
                     </TouchableOpacity>
                   </View>
                 ))}
                 {newImageUrls.length < MAX_PHOTOS && (
                   <TouchableOpacity style={styles.addPhotoTile} onPress={handlePickProductImage} disabled={uploading}>
                     {uploading ? (
-                      <ActivityIndicator color="#34C759" />
+                      <ActivityIndicator color={colors.brand} />
                     ) : (
                       <>
-                        <Ionicons name="camera" size={28} color="#94A3B8" />
+                        <Ionicons name="camera" size={28} color={colors.textTertiary} />
                         <Text style={styles.imageSelectorText}>Add Photo</Text>
                       </>
                     )}
@@ -615,62 +616,62 @@ export default function MarketScreen({ route, session: directSession, navigation
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   typeTabsContainer: { paddingHorizontal: 14, alignItems: 'center' },
-  typeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, marginRight: 8 },
-  typeTabActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  typeTabText: { fontSize: 13, fontWeight: '700', color: '#475569' },
-  typeTabTextActive: { color: '#fff' },
+  typeTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, marginRight: 8 },
+  typeTabActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  typeTabText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.slate[600] },
+  typeTabTextActive: { color: colors.white },
 
   filterHeaderLayout: { flexDirection: 'row', paddingHorizontal: 14, marginTop: 10, marginBottom: 4, alignItems: 'center' },
-  searchBarContainer: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', height: 46 },
+  searchBarContainer: { flexDirection: 'row', backgroundColor: colors.white, paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.border, height: 46 },
   searchIcon: { marginRight: 6 },
-  searchInput: { flex: 1, height: '100%', fontSize: 14, color: '#334155', fontWeight: '500' },
+  searchInput: { flex: 1, height: '100%', fontSize: 14, color: colors.slate[700], fontFamily: fontFamily.medium },
   gridContainer: { padding: 14, paddingBottom: 100 },
   gridColumnWrapper: { justifyContent: 'space-between' },
-  card: { backgroundColor: '#fff', width: COLUMN_WIDTH, borderRadius: 20, marginBottom: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 8 },
-  imageContainer: { width: '100%', height: COLUMN_WIDTH * 1.1, backgroundColor: '#F1F5F9' },
+  card: { backgroundColor: colors.white, width: COLUMN_WIDTH, borderRadius: 20, marginBottom: 14, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.02, shadowRadius: 8 },
+  imageContainer: { width: '100%', height: COLUMN_WIDTH * 1.1, backgroundColor: colors.slate[100] },
   cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   placeholderImage: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   categoryBadge: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  categoryBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  categoryBadgeText: { color: colors.white, fontSize: 10, fontFamily: fontFamily.bold },
   businessBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: '#8B5CF6', width: 22, height: 22, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
   cardDetails: { padding: 12 },
-  cardPrice: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
-  cardTitle: { fontSize: 14, color: '#475569', fontWeight: '600', marginTop: 2 },
+  cardPrice: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  cardTitle: { fontSize: 14, color: colors.slate[600], fontFamily: fontFamily.semibold, marginTop: 2 },
   locationContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  cardLocation: { fontSize: 12, color: '#94A3B8', marginLeft: 4, fontWeight: '500', flex: 1 },
-  fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: '#34C759', flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, alignItems: 'center', elevation: 5, shadowColor: '#34C759', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
-  fabText: { color: '#fff', fontSize: 16, fontWeight: '700', marginLeft: 6 },
+  cardLocation: { fontSize: 12, color: colors.textTertiary, marginLeft: 4, fontFamily: fontFamily.medium, flex: 1 },
+  fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: colors.brand, flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, alignItems: 'center', elevation: 5, shadowColor: colors.brand, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
+  fabText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold, marginLeft: 6 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
+  modalContent: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
-  imageSelectorText: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 4 },
-  photoThumbWrap: { width: 100, height: 100, borderRadius: 14, marginRight: 10, overflow: 'hidden', position: 'relative', backgroundColor: '#F1F5F9' },
+  modalTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
+  imageSelectorText: { fontSize: 12, color: colors.textSecondary, fontFamily: fontFamily.semibold, marginTop: 4 },
+  photoThumbWrap: { width: 100, height: 100, borderRadius: 14, marginRight: 10, overflow: 'hidden', position: 'relative', backgroundColor: colors.slate[100] },
   photoThumb: { width: '100%', height: '100%', resizeMode: 'cover' },
-  coverBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(52,199,89,0.9)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  coverBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  coverBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(27,113,51,0.9)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  coverBadgeText: { color: colors.white, fontSize: 9, fontFamily: fontFamily.extrabold },
   removePhotoButton: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' },
-  addPhotoTile: { width: 100, height: 100, borderRadius: 14, backgroundColor: '#F1F5F9', borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center' },
+  addPhotoTile: { width: 100, height: 100, borderRadius: 14, backgroundColor: colors.slate[100], borderStyle: 'dashed', borderWidth: 2, borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center' },
   photoCountBadge: { position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
-  photoCountText: { color: '#fff', fontSize: 10, fontWeight: '700', marginLeft: 4 },
-  fieldLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 6, marginLeft: 2 },
-  modalInput: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#334155', marginBottom: 14, fontWeight: '500' },
+  photoCountText: { color: colors.white, fontSize: 10, fontFamily: fontFamily.bold, marginLeft: 4 },
+  fieldLabel: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: 6, marginLeft: 2 },
+  modalInput: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.slate[700], marginBottom: 14, fontFamily: fontFamily.medium },
   modalTextArea: { height: 70, textAlignVertical: 'top' },
   modalCategoryRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 14 },
-  modalCatPill: { backgroundColor: '#E2E8F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, marginRight: 6, marginBottom: 6 },
-  modalCatPillActive: { backgroundColor: '#34C759' },
-  modalCatText: { fontSize: 12, color: '#475569', fontWeight: '700' },
-  modalCatTextActive: { color: '#fff' },
-  submitListingButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 10 },
-  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  modalCatPill: { backgroundColor: colors.border, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, marginRight: 6, marginBottom: 6 },
+  modalCatPillActive: { backgroundColor: colors.brand },
+  modalCatText: { fontSize: 12, color: colors.slate[600], fontFamily: fontFamily.bold },
+  modalCatTextActive: { color: colors.white },
+  submitListingButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 14, alignItems: 'center', marginTop: 10 },
+  submitButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold },
 
   identityRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
-  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#F8FAFC', borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  identityPillActive: { backgroundColor: '#F0FDF4', borderColor: '#34C759' },
-  identityText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
-  identityTextActive: { color: '#34C759' },
+  identityPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, backgroundColor: colors.backgroundMuted, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
+  identityPillActive: { backgroundColor: colors.brandSubtle, borderColor: colors.brand },
+  identityText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 6 },
+  identityTextActive: { color: colors.brand },
 });

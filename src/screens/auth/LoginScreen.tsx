@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
-import { colors, radii, spacing, typography } from '../../theme';
+import { colors, radii, spacing, typography, fontFamily } from '../../theme';
 import Button from '../../components/ui/Button';
 import SocialSignInButtons from '../../components/SocialSignInButtons';
 
@@ -97,7 +97,7 @@ const styles = StyleSheet.create({
   label: { ...typography.bodyMedium, color: colors.slate[600], marginBottom: spacing.sm, marginLeft: spacing.xs },
   input: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, borderRadius: radii.md, fontSize: 16, fontFamily: typography.bodyLarge.fontFamily, color: colors.textPrimary },
   inputError: { borderColor: colors.danger },
-  errorText: { color: colors.danger, fontSize: 12, marginTop: spacing.xs, marginLeft: spacing.xs },
+  errorText: { color: colors.danger, fontFamily: fontFamily.regular, fontSize: 12, marginTop: spacing.xs, marginLeft: spacing.xs },
   errorBanner: { ...typography.bodyMedium, color: colors.danger, textAlign: 'center', marginBottom: spacing.lg },
   passwordContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md },
   passwordInput: { flex: 1, padding: spacing.lg, fontSize: 16, fontFamily: typography.bodyLarge.fontFamily, color: colors.textPrimary },

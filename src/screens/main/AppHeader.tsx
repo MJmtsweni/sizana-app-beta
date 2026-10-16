@@ -7,7 +7,7 @@ import MailIcon from './MailIcon';
 import { colors, spacing, typography } from '../../theme';
 
 // Adjust this path to wherever the asset actually lives relative to this file
-const LOGO_MARK = require('../../../assets/sizana-navbar-icon.png');
+const LOGO_MARK = require('../../../assets/brand/sizana-icon-512.png');
 
 type AppHeaderProps = {
   session: any;
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   logoMark: {
     width: 44,
     height: 44,
-    resizeMode: 'cover',
+    resizeMode: 'contain',
   },
   logoChevron: {
     marginTop: 1,

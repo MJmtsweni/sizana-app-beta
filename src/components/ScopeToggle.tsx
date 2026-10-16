@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { colors, fontFamily } from '../theme';
 export type Scope = 'nearby' | 'home' | 'explore';
 
 type ScopeToggleProps = {
@@ -30,7 +31,7 @@ export default function ScopeToggle({ scope, onChange, nearbyModeLabel }: ScopeT
               style={[styles.pill, active && styles.pillActive]}
               onPress={() => onChange(tab.key)}
             >
-              <Ionicons name={tab.icon} size={13} color={active ? '#fff' : '#34C759'} />
+              <Ionicons name={tab.icon} size={13} color={active ? colors.white : colors.brand} />
               <Text style={[styles.text, active && styles.textActive]} numberOfLines={1}>
                 {tab.label}
               </Text>
@@ -49,11 +50,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, gap: 8 },
   pill: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 10, borderRadius: 14, backgroundColor: '#F0FDF4',
-    borderWidth: 1, borderColor: '#DCFCE7',
+    paddingVertical: 10, borderRadius: 14, backgroundColor: colors.brandSubtle,
+    borderWidth: 1, borderColor: colors.brandSubtleStrong,
   },
-  pillActive: { backgroundColor: '#34C759', borderColor: '#34C759' },
-  text: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 5 },
-  textActive: { color: '#fff' },
-  subtitle: { fontSize: 11, color: '#94A3B8', fontWeight: '600', paddingHorizontal: 16, paddingTop: 6 },
+  pillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  text: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 5 },
+  textActive: { color: colors.white },
+  subtitle: { fontSize: 11, color: colors.textTertiary, fontFamily: fontFamily.semibold, paddingHorizontal: 16, paddingTop: 6 },
 });

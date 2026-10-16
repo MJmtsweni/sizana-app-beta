@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { colors, fontFamily } from '../../theme';
 const renderTextWithLinks = (text: string) => {
   if (!text) return null;
   const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -17,7 +18,7 @@ const renderTextWithLinks = (text: string) => {
   return parts.map((part, index) => {
     if (part.match(urlRegex)) {
       return (
-        <Text key={index} style={{ color: '#3B82F6', textDecorationLine: 'underline' }} 
+        <Text key={index} style={{ color: colors.accent, textDecorationLine: 'underline' }} 
               onPress={() => Linking.openURL(part)}>
           {part}
         </Text>
@@ -238,7 +239,7 @@ export default function ThreadScreen({ route, navigation }: any) {
           {displayAvatar ? (
             <Image source={{ uri: displayAvatar }} style={styles.avatarImage} />
           ) : (
-            <Ionicons name={currentPost.business ? "briefcase" : "person-circle"} size={40} color="#CBD5E1" />
+            <Ionicons name={currentPost.business ? "briefcase" : "person-circle"} size={40} color={colors.borderStrong} />
           )}
           <View style={styles.authorDetails}>
             <Text style={styles.authorName}>{displayName}</Text>
@@ -262,7 +263,7 @@ export default function ThreadScreen({ route, navigation }: any) {
           style={styles.opReplyButton} 
           onPress={() => { setEditingCommentId(null); setReplyingTo({ author: currentPost.author }); }}
         >
-          <Ionicons name="arrow-undo-outline" size={16} color="#64748B" />
+          <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
           <Text style={styles.opReplyText}>Reply to Original Post</Text>
         </TouchableOpacity>
 
@@ -287,7 +288,7 @@ export default function ThreadScreen({ route, navigation }: any) {
             {item.author?.avatar_url ? (
               <Image source={{ uri: item.author.avatar_url }} style={styles.commentAvatar} />
             ) : (
-              <Ionicons name="person-circle" size={28} color="#CBD5E1" />
+              <Ionicons name="person-circle" size={28} color={colors.borderStrong} />
             )}
             <Text style={styles.commentAuthorName}>{item.author?.username || 'Member'}</Text>
             <Text style={styles.commentTime}> • {formatTime(item.created_at)}</Text>
@@ -309,7 +310,7 @@ export default function ThreadScreen({ route, navigation }: any) {
                 ]);
               }}
             >
-              <Ionicons name="ellipsis-horizontal" size={16} color="#94A3B8" />
+              <Ionicons name="ellipsis-horizontal" size={16} color={colors.textTertiary} />
             </TouchableOpacity>
           )}
         </View>
@@ -328,7 +329,7 @@ export default function ThreadScreen({ route, navigation }: any) {
         {/* Comment Image Handling with Zoom triggers */}
         {item.image_url && (
           <TouchableOpacity 
-            style={{ marginLeft: 36, marginTop: 8, borderRadius: 12, overflow: 'hidden', width: 160, height: 160, backgroundColor: '#F1F5F9' }}
+            style={{ marginLeft: 36, marginTop: 8, borderRadius: 12, overflow: 'hidden', width: 160, height: 160, backgroundColor: colors.slate[100] }}
             onPress={() => setFullScreenImage(item.image_url)}
           >
             <Image source={{ uri: item.image_url }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
@@ -340,9 +341,9 @@ export default function ThreadScreen({ route, navigation }: any) {
             style={styles.commentActionBtn} 
             onPress={() => toggleCommentLike(item.id, item.isLiked)}
           >
-            <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={16} color={item.isLiked ? "#EF4444" : "#94A3B8"} />
+            <Ionicons name={item.isLiked ? "heart" : "heart-outline"} size={16} color={item.isLiked ? colors.danger : colors.textTertiary} />
             {item.likesCount > 0 && (
-              <Text style={[styles.commentActionText, item.isLiked && { color: '#EF4444' }]}>
+              <Text style={[styles.commentActionText, item.isLiked && { color: colors.danger }]}>
                 {item.likesCount}
               </Text>
             )}
@@ -369,16 +370,16 @@ export default function ThreadScreen({ route, navigation }: any) {
     >
       <View style={styles.navPanel}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#1E293B" />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.navTitle}>Discussion Thread</Text>
         <TouchableOpacity onPress={handleShareThread} style={styles.backButton}>
-          <Ionicons name="share-social" size={20} color="#1E293B" />
+          <Ionicons name="share-social" size={20} color={colors.textPrimary} />
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
           ref={flatListRef}
@@ -400,22 +401,22 @@ export default function ThreadScreen({ route, navigation }: any) {
       {replyingTo && (
         <View style={styles.replyBanner}>
           <Text style={styles.replyBannerText}>
-            Replying to <Text style={{ fontWeight: '700' }}>@{replyingTo.author?.username}</Text>
+            Replying to <Text style={{ fontFamily: fontFamily.bold }}>@{replyingTo.author?.username}</Text>
           </Text>
           <TouchableOpacity onPress={() => setReplyingTo(null)}>
-            <Ionicons name="close-circle" size={20} color="#94A3B8" />
+            <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
           </TouchableOpacity>
         </View>
       )}
 
       {/* Edit Banner Mode */}
       {editingCommentId && (
-        <View style={[styles.replyBanner, { backgroundColor: '#EFF6FF' }]}>
-          <Text style={[styles.replyBannerText, { color: '#1E40AF' }]}>
+        <View style={[styles.replyBanner, { backgroundColor: colors.accentSubtle }]}>
+          <Text style={[styles.replyBannerText, { color: colors.blue[700] }]}>
             Editing your comment...
           </Text>
           <TouchableOpacity onPress={() => { setEditingCommentId(null); setNewComment(''); }}>
-            <Ionicons name="close-circle" size={20} color="#3B82F6" />
+            <Ionicons name="close-circle" size={20} color={colors.accent} />
           </TouchableOpacity>
         </View>
       )}
@@ -423,8 +424,8 @@ export default function ThreadScreen({ route, navigation }: any) {
       {/* BOTTOM INPUT DOCK */}
       {currentPost.comments_disabled === true ? (
         <View style={[styles.inputDockContainer, { paddingBottom: Math.max(insets.bottom, 12), justifyContent: 'center', alignItems: 'center', paddingVertical: 16 }]}>
-          <Ionicons name="lock-closed" size={16} color="#94A3B8" />
-          <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginLeft: 8 }}>
+          <Ionicons name="lock-closed" size={16} color={colors.textTertiary} />
+          <Text style={{ color: colors.textTertiary, fontSize: 14, fontFamily: fontFamily.semibold, marginLeft: 8 }}>
             Comments are disabled by the author.
           </Text>
         </View>
@@ -435,11 +436,11 @@ export default function ThreadScreen({ route, navigation }: any) {
             placeholder={replyingTo ? "Write your reply..." : editingCommentId ? "Update your comment..." : "Write a comment..."}
             value={newComment}
             onChangeText={setNewComment}
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={colors.textTertiary}
             multiline
           />
           <TouchableOpacity style={styles.sendActionButton} onPress={handleSendComment} disabled={submitting}>
-            {submitting ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={16} color="#fff" />}
+            {submitting ? <ActivityIndicator color={colors.white} size="small" /> : <Ionicons name="send" size={16} color={colors.white} />}
           </TouchableOpacity>
         </View>
       )}
@@ -460,7 +461,7 @@ export default function ThreadScreen({ route, navigation }: any) {
             style={{ position: 'absolute', top: Math.max(insets.top, 50), right: 20, zIndex: 10 }} 
             onPress={() => setFullScreenImage(null)}
           >
-            <Ionicons name="close-circle" size={36} color="#fff" />
+            <Ionicons name="close-circle" size={36} color={colors.white} />
           </TouchableOpacity>
           
           <Image 
@@ -474,50 +475,50 @@ export default function ThreadScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#fff' },
+  mainContainer: { flex: 1, backgroundColor: colors.white },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 60 : 45, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#fff' },
-  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
-  navTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
+  navPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 60 : 45, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
+  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center' },
+  navTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary },
   
-  parentPostContainer: { padding: 16, backgroundColor: '#fff' },
+  parentPostContainer: { padding: 16, backgroundColor: colors.white },
   postHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   avatarImage: { width: 40, height: 40, borderRadius: 20 },
   authorDetails: { marginLeft: 10 },
-  authorName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
-  postTopicBadge: { fontSize: 11, fontWeight: '700', color: '#3B82F6', marginTop: 2 },
-  postTitle: { fontSize: 20, fontWeight: '800', color: '#1E293B', marginBottom: 8 },
-  postBodyText: { fontSize: 15, color: '#334155', lineHeight: 24 },
+  authorName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  postTopicBadge: { fontSize: 11, fontFamily: fontFamily.bold, color: colors.accent, marginTop: 2 },
+  postTitle: { fontSize: 20, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 8 },
+  postBodyText: { fontFamily: fontFamily.regular, fontSize: 15, color: colors.slate[700], lineHeight: 24 },
   mediaContainer: { width: '100%', height: 220, borderRadius: 12, marginTop: 12, overflow: 'hidden' },
   postMedia: { width: '100%', height: '100%', resizeMode: 'cover' },
   
   opReplyButton: { flexDirection: 'row', alignItems: 'center', marginTop: 16, paddingVertical: 8 },
-  opReplyText: { fontSize: 13, fontWeight: '600', color: '#64748B', marginLeft: 6 },
+  opReplyText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 6 },
   
-  divider: { height: 1, backgroundColor: '#E2E8F0', marginTop: 8, marginBottom: 16 },
-  commentsCountLabel: { fontSize: 14, fontWeight: '800', color: '#64748B', marginBottom: 4 },
+  divider: { height: 1, backgroundColor: colors.border, marginTop: 8, marginBottom: 16 },
+  commentsCountLabel: { fontSize: 14, fontFamily: fontFamily.extrabold, color: colors.textSecondary, marginBottom: 4 },
   
-  commentCard: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  commentCard: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
   commentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   commentAvatar: { width: 28, height: 28, borderRadius: 14 },
-  commentAuthorName: { fontSize: 13, fontWeight: '700', color: '#1E293B', marginLeft: 8 },
-  commentTime: { fontSize: 11, color: '#94A3B8' },
+  commentAuthorName: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textPrimary, marginLeft: 8 },
+  commentTime: { fontFamily: fontFamily.regular, fontSize: 11, color: colors.textTertiary },
   
-  commentBodyText: { fontSize: 14, color: '#334155', lineHeight: 20, marginLeft: 36 },
-  taggedUserText: { color: '#3B82F6', fontWeight: '600' },
+  commentBodyText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[700], lineHeight: 20, marginLeft: 36 },
+  taggedUserText: { color: colors.accent, fontFamily: fontFamily.semibold },
 
   commentActionRow: { flexDirection: 'row', alignItems: 'center', marginLeft: 36, marginTop: 8 },
   commentActionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingRight: 8 },
-  commentActionText: { fontSize: 12, fontWeight: '600', color: '#94A3B8', marginLeft: 4 },
-  replyButtonText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
+  commentActionText: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textTertiary, marginLeft: 4 },
+  replyButtonText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
   
   emptyCommentsLayout: { alignItems: 'center', padding: 30 },
-  emptyCommentsText: { color: '#94A3B8', fontSize: 13, textAlign: 'center', fontWeight: '500' },
+  emptyCommentsText: { color: colors.textTertiary, fontSize: 13, textAlign: 'center', fontFamily: fontFamily.medium },
   
-  replyBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0' },
-  replyBannerText: { fontSize: 13, color: '#475569' },
+  replyBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.backgroundMuted, paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  replyBannerText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.slate[600] },
   
-  inputDockContainer: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F1F5F9', alignItems: 'center', backgroundColor: '#fff' },
-  chatInputField: { flex: 1, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, maxHeight: 80, color: '#334155', fontWeight: '500' },
-  sendActionButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#34C759', justifyContent: 'center', alignItems: 'center', marginLeft: 10 }
+  inputDockContainer: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.slate[100], alignItems: 'center', backgroundColor: colors.white },
+  chatInputField: { flex: 1, backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, maxHeight: 80, color: colors.slate[700], fontFamily: fontFamily.medium },
+  sendActionButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.brand, justifyContent: 'center', alignItems: 'center', marginLeft: 10 }
 });

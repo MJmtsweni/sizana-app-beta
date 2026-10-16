@@ -21,6 +21,7 @@ import { PAGE_SIZE, pageRange } from '../../lib/pagination';
 import { CategoryPicker, EmptyState, ModalSheet } from '../../components/ui';
 import EditBusinessModalScreen from './EditBusinessModalScreen';
 
+import { colors, fontFamily } from '../../theme';
 export default function BusinessScreen({ navigation, route }: any) {
   const session = route?.params?.session;
   const insets = useSafeAreaInsets();
@@ -361,14 +362,14 @@ export default function BusinessScreen({ navigation, route }: any) {
           <Image source={{ uri: item.logo_url }} style={styles.bizLogo} />
         ) : (
           <View style={[styles.bizLogo, styles.logoPlaceholder]}>
-            <Ionicons name="briefcase" size={24} color="#94A3B8" />
+            <Ionicons name="briefcase" size={24} color={colors.textTertiary} />
           </View>
         )}
         <View style={styles.headerTextContainer}>
           <Text style={styles.categoryBadge}>{item.category}</Text>
           <Text style={styles.bizName}>{item.name}</Text>
           <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={14} color="#64748B" />
+            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
             <Text style={styles.locationText}>{item.location}</Text>
             {item._distanceKm != null && (
               <Text style={styles.distanceBadge}>· {formatDistance(item._distanceKm)}</Text>
@@ -387,7 +388,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               ]);
             }}
           >
-            <Ionicons name="ellipsis-vertical" size={20} color="#64748B" />
+            <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
         )}
       </View>
@@ -396,7 +397,7 @@ export default function BusinessScreen({ navigation, route }: any) {
         <Text style={styles.descriptionText} numberOfLines={3}>{item.description}</Text>
         {item.operating_hours && (
           <View style={styles.detailRow}>
-            <Ionicons name="time-outline" size={16} color="#34C759" />
+            <Ionicons name="time-outline" size={16} color={colors.brand} />
             <Text style={styles.detailText}><Text style={styles.boldText}>Hours:</Text> {item.operating_hours}</Text>
           </View>
         )}
@@ -404,13 +405,13 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       {item.gallery && item.gallery.length > 0 && (
         <View style={{ paddingBottom: 16 }}>
-          <Text style={{ paddingHorizontal: 16, fontSize: 13, fontWeight: '800', color: '#64748B', marginBottom: 8, textTransform: 'uppercase' }}>Products & Portfolio</Text>
+          <Text style={{ paddingHorizontal: 16, fontSize: 13, fontFamily: fontFamily.extrabold, color: colors.textSecondary, marginBottom: 8, textTransform: 'uppercase' }}>Products & Portfolio</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16 }}>
             {item.gallery.map((media: any) => (
               <View key={media.id} style={{ marginRight: 12, width: 120 }}>
-                <Image source={{ uri: media.media_url }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: '#F1F5F9' }} />
+                <Image source={{ uri: media.media_url }} style={{ width: 120, height: 120, borderRadius: 12, backgroundColor: colors.slate[100] }} />
                 {media.label && (
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#1E293B', marginTop: 6 }} numberOfLines={1}>{media.label}</Text>
+                  <Text style={{ fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textPrimary, marginTop: 6 }} numberOfLines={1}>{media.label}</Text>
                 )}
               </View>
             ))}
@@ -420,11 +421,11 @@ export default function BusinessScreen({ navigation, route }: any) {
 
       {session?.user?.id === item.creator_id && (
         <TouchableOpacity 
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0FDF4', marginHorizontal: 16, paddingVertical: 10, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: '#DCFCE7' }}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.brandSubtle, marginHorizontal: 16, paddingVertical: 10, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: colors.brandSubtleStrong }}
           onPress={() => { setActiveBusinessId(item.id); setGalleryModalVisible(true); }}
         >
-          <Ionicons name="camera" size={16} color="#34C759" />
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#34C759', marginLeft: 6 }}>Add to Portfolio</Text>
+          <Ionicons name="camera" size={16} color={colors.brand} />
+          <Text style={{ fontSize: 13, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 6 }}>Add to Portfolio</Text>
         </TouchableOpacity>
       )}
 
@@ -432,22 +433,22 @@ export default function BusinessScreen({ navigation, route }: any) {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           {item.contact_phone && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(`tel:${item.contact_phone}`)}>
-              <Ionicons name="call" size={18} color="#475569" />
+              <Ionicons name="call" size={18} color={colors.slate[600]} />
             </TouchableOpacity>
           )}
           {item.whatsapp_number && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleWhatsApp(item.whatsapp_number)}>
-              <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              <Ionicons name="logo-whatsapp" size={18} color={colors.whatsapp} />
             </TouchableOpacity>
           )}
           {item.contact_email && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(`mailto:${item.contact_email}`)}>
-              <Ionicons name="mail" size={18} color="#475569" />
+              <Ionicons name="mail" size={18} color={colors.slate[600]} />
             </TouchableOpacity>
           )}
           {item.website_url && (
             <TouchableOpacity style={styles.iconButton} onPress={() => handleOpenLink(item.website_url.startsWith('http') ? item.website_url : `https://${item.website_url}`)}>
-              <Ionicons name="globe-outline" size={18} color="#475569" />
+              <Ionicons name="globe-outline" size={18} color={colors.slate[600]} />
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -467,7 +468,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               session: session,
             })}
           >
-            <Ionicons name="chatbubbles" size={20} color="#fff" />
+            <Ionicons name="chatbubbles" size={20} color={colors.white} />
             <Text style={styles.messageButtonText}>Chat with Business</Text>
           </TouchableOpacity>
         </View>
@@ -481,7 +482,7 @@ export default function BusinessScreen({ navigation, route }: any) {
         <View style={styles.headerTitleRow}>
           <Text style={styles.navTitle}>Local Directory</Text>
           <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.navIconButton}>
-            <Ionicons name="add-circle" size={28} color="#34C759" />
+            <Ionicons name="add-circle" size={28} color={colors.brand} />
           </TouchableOpacity>
         </View>
         <ScopeToggle
@@ -496,14 +497,14 @@ export default function BusinessScreen({ navigation, route }: any) {
           }
         />
         <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#94A3B8" style={styles.searchIcon} />
+          <Ionicons name="search" size={20} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput style={styles.searchInput} placeholder="Search businesses..." value={searchQuery} onChangeText={setSearchQuery} />
         </View>
         <CategoryPicker categories={filterCategories} selected={activeCategory} onSelect={setActiveCategory} />
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color="#34C759" /></View>
+        <View style={styles.centered}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : (
         <FlatList
           data={businesses}
@@ -515,7 +516,7 @@ export default function BusinessScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           onEndReached={loadMoreBusinesses}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={loadingMore ? <ActivityIndicator color="#34C759" style={{ marginVertical: 20 }} /> : undefined}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.brand} style={{ marginVertical: 20 }} /> : undefined}
           ListEmptyComponent={
             scope === 'home' && !myLocation ? (
               <EmptyState
@@ -550,7 +551,7 @@ export default function BusinessScreen({ navigation, route }: any) {
                   <Image source={{ uri: newBiz.coverPhotoUri }} style={{ width: '100%', height: '100%', borderRadius: 12 }} />
                 ) : (
                   <>
-                    <Ionicons name="image-outline" size={32} color="#94A3B8" />
+                    <Ionicons name="image-outline" size={32} color={colors.textTertiary} />
                     <Text style={styles.imagePlaceholderText}>Upload Cover Photo</Text>
                   </>
                 )}
@@ -558,7 +559,7 @@ export default function BusinessScreen({ navigation, route }: any) {
 
               <View style={styles.imagePickerRow}>
                 <TouchableOpacity style={styles.imageSelector} onPress={pickLogoImage}>
-                  {newBiz.logoUri ? <Image source={{ uri: newBiz.logoUri }} style={styles.selectedLogo} /> : <><Ionicons name="image-outline" size={28} color="#94A3B8" /><Text style={styles.imagePlaceholderText}>Upload Logo</Text></>}
+                  {newBiz.logoUri ? <Image source={{ uri: newBiz.logoUri }} style={styles.selectedLogo} /> : <><Ionicons name="image-outline" size={28} color={colors.textTertiary} /><Text style={styles.imagePlaceholderText}>Upload Logo</Text></>}
                 </TouchableOpacity>
                 <View style={{ flex: 1, paddingLeft: 16 }}>
                   <Text style={styles.inputLabel}>Business Name</Text>
@@ -596,7 +597,7 @@ export default function BusinessScreen({ navigation, route }: any) {
                           }
                         }}
                       >
-                        {capturingLocation ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="navigate" size={20} color="#34C759" />}
+                        {capturingLocation ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={20} color={colors.brand} />}
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -606,14 +607,14 @@ export default function BusinessScreen({ navigation, route }: any) {
                 <Text style={styles.inputLabel}>Operating Hours</Text>
                 <View style={styles.halfInputRow}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Opening Time</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Opening Time</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                          <DateTimePicker value={openTime} mode="time" display="default" onChange={(e, d) => d && setOpenTime(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowOpenPicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatTime(openTime)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatTime(openTime)}</Text>
                       </TouchableOpacity>
                     )}
                     {showOpenPicker && Platform.OS === 'android' && (
@@ -622,14 +623,14 @@ export default function BusinessScreen({ navigation, route }: any) {
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>Closing Time</Text>
+                    <Text style={{ fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Closing Time</Text>
                     {Platform.OS === 'ios' ? (
                       <View style={[styles.inputField, { justifyContent: 'center', alignItems: 'flex-start' }]}>
                         <DateTimePicker value={closeTime} mode="time" display="default" onChange={(e, d) => d && setCloseTime(d)} />
                       </View>
                     ) : (
                       <TouchableOpacity style={[styles.inputField, { justifyContent: 'center' }]} onPress={() => setShowClosePicker(true)}>
-                        <Text style={{ color: '#1E293B' }}>{formatTime(closeTime)}</Text>
+                        <Text style={{ color: colors.textPrimary }}>{formatTime(closeTime)}</Text>
                       </TouchableOpacity>
                     )}
                     {showClosePicker && Platform.OS === 'android' && (
@@ -645,7 +646,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput style={styles.inputField} keyboardType="email-address" value={newBiz.contact_email} onChangeText={t => setNewBiz({...newBiz, contact_email: t})} />
               <TouchableOpacity style={styles.publishButton} onPress={handleRegisterBusiness} disabled={uploading}>
-                {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Register Business</Text>}
+                {uploading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishButtonText}>Register Business</Text>}
               </TouchableOpacity>
       </ModalSheet>
 
@@ -667,7 +668,7 @@ export default function BusinessScreen({ navigation, route }: any) {
               <Text style={styles.inputLabel}>Product Label (Optional)</Text>
               <TextInput style={styles.inputField} placeholder="e.g. Summer Shoes" value={galleryLabel} onChangeText={setGalleryLabel} />
               <TouchableOpacity style={styles.publishButton} onPress={handleAddGalleryItem} disabled={uploadingGallery || !galleryImageUri}>
-                {uploadingGallery ? <ActivityIndicator color="#fff" /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
+                {uploadingGallery ? <ActivityIndicator color={colors.white} /> : <Text style={styles.publishButtonText}>Upload Image</Text>}
               </TouchableOpacity>
       </ModalSheet>
 
@@ -683,48 +684,48 @@ export default function BusinessScreen({ navigation, route }: any) {
   );
 }
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  mainContainer: { flex: 1, backgroundColor: colors.backgroundMuted },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  topPanel: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 10 },
+  topPanel: { backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 10 },
   headerTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 16 },
-  navTitle: { fontSize: 24, fontWeight: '800', color: '#1E293B' },
+  navTitle: { fontSize: 24, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
   navIconButton: { padding: 4 },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', marginHorizontal: 20, borderRadius: 12, paddingHorizontal: 16, height: 44, marginBottom: 16 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], marginHorizontal: 20, borderRadius: 12, paddingHorizontal: 16, height: 44, marginBottom: 16 },
   searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15, color: '#1E293B', fontWeight: '500' },
+  searchInput: { flex: 1, fontSize: 15, color: colors.textPrimary, fontFamily: fontFamily.medium },
   
-  bizCard: { backgroundColor: '#fff', borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  bizCard: { backgroundColor: colors.white, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   cardCoverImage: { width: '100%', height: 120, resizeMode: 'cover' },
-  cardHeader: { flexDirection: 'row', padding: 16, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  cardHeader: { flexDirection: 'row', padding: 16, backgroundColor: colors.backgroundMuted, borderBottomWidth: 1, borderBottomColor: colors.slate[100] },
   cardHeaderWithCover: { paddingTop: 8 },
-  bizLogo: { width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: '#fff', marginTop: -30 }, // Overlaps the cover if cover exists
-  logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#F1F5F9', marginTop: 0 },
+  bizLogo: { width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: colors.white, backgroundColor: colors.white, marginTop: -30 }, // Overlaps the cover if cover exists
+  logoPlaceholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate[100], marginTop: 0 },
   headerTextContainer: { flex: 1, marginLeft: 16, justifyContent: 'center' },
-  categoryBadge: { fontSize: 10, fontWeight: '800', color: '#3B82F6', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
-  bizName: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
+  categoryBadge: { fontSize: 10, fontFamily: fontFamily.extrabold, color: colors.accent, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  bizName: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginBottom: 6 },
   locationRow: { flexDirection: 'row', alignItems: 'center' },
-  locationText: { fontSize: 12, fontWeight: '600', color: '#64748B', marginLeft: 4 },
+  locationText: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textSecondary, marginLeft: 4 },
   
   cardBody: { padding: 16 },
-  descriptionText: { fontSize: 14, color: '#475569', lineHeight: 22, marginBottom: 12 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: '#F0FDF4', padding: 8, borderRadius: 8, alignSelf: 'flex-start' },
-  detailText: { fontSize: 12, color: '#1E293B', marginLeft: 6 },
-  boldText: { fontWeight: '700' },
+  descriptionText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.slate[600], lineHeight: 22, marginBottom: 12 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, backgroundColor: colors.brandSubtle, padding: 8, borderRadius: 8, alignSelf: 'flex-start' },
+  detailText: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textPrimary, marginLeft: 6 },
+  boldText: { fontFamily: fontFamily.bold },
   contactActionBar: { paddingHorizontal: 16, paddingBottom: 16 },
-  iconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0' },
+  iconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.slate[100], justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1, borderColor: colors.border },
   cardFooter: { padding: 16, paddingTop: 0 },
-  messageButton: { flexDirection: 'row', backgroundColor: '#34C759', paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  messageButtonText: { fontSize: 15, fontWeight: '700', color: '#fff', marginLeft: 8 },
-  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  distanceBadge: { fontSize: 12, fontWeight: '700', color: '#34C759', marginLeft: 4 },
-  sectionHeader: { fontSize: 16, fontWeight: '800', color: '#1E293B', marginTop: 8, marginBottom: 12 },
+  messageButton: { flexDirection: 'row', backgroundColor: colors.brand, paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  messageButtonText: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.white, marginLeft: 8 },
+  useLocationButton: { width: 48, height: 48, borderRadius: 12, backgroundColor: colors.brandSubtle, borderWidth: 1, borderColor: colors.brandSubtleStrong, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  distanceBadge: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.brand, marginLeft: 4 },
+  sectionHeader: { fontSize: 16, fontFamily: fontFamily.extrabold, color: colors.textPrimary, marginTop: 8, marginBottom: 12 },
   imagePickerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  imageSelector: { width: 80, height: 80, borderRadius: 16, backgroundColor: '#F8FAFC', borderWidth: 2, borderStyle: 'dashed', borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  imageSelector: { width: 80, height: 80, borderRadius: 16, backgroundColor: colors.backgroundMuted, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.borderStrong, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   selectedLogo: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imagePlaceholderText: { fontSize: 12, fontWeight: '700', color: '#94A3B8', marginTop: 4 },
+  imagePlaceholderText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textTertiary, marginTop: 4 },
   halfInputRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  inputLabel: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 6, marginLeft: 4 },
-  inputField: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, color: '#1E293B', marginBottom: 16 },
-  publishButton: { backgroundColor: '#34C759', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
-  publishButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' }
+  inputLabel: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: 6, marginLeft: 4 },
+  inputField: { backgroundColor: colors.backgroundMuted, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontFamily: fontFamily.regular, fontSize: 14, color: colors.textPrimary, marginBottom: 16 },
+  publishButton: { backgroundColor: colors.brand, paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
+  publishButtonText: { color: colors.white, fontSize: 16, fontFamily: fontFamily.bold }
 });

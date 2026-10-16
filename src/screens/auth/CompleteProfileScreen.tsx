@@ -120,7 +120,7 @@ export default function CompleteProfileScreen({ session, initialUsername, onComp
                 return (
                   <TouchableOpacity key={city} style={[styles.pill, isActive && styles.pillActive]} onPress={() => toggleRegion(city)}>
                     <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{city}</Text>
-                    {isActive && <Ionicons name="close" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                    {isActive && <Ionicons name="close" size={14} color={colors.white} style={{ marginLeft: 6 }} />}
                   </TouchableOpacity>
                 );
               })}
@@ -135,7 +135,7 @@ export default function CompleteProfileScreen({ session, initialUsername, onComp
             return (
               <TouchableOpacity key={topic} style={[styles.pill, isActive && styles.pillActive]} onPress={() => toggleInterest(topic)}>
                 <Text style={[styles.pillText, isActive && styles.pillTextActive]}>{topic}</Text>
-                {isActive && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginLeft: 6 }} />}
+                {isActive && <Ionicons name="checkmark" size={14} color={colors.white} style={{ marginLeft: 6 }} />}
               </TouchableOpacity>
             );
           })}
@@ -163,12 +163,12 @@ const styles = StyleSheet.create({
 
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionHeader: { fontSize: 18, fontFamily: fontFamily.extrabold, color: colors.textPrimary },
-  selectionCountText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.accent },
+  selectionCountText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.brand },
   provinceHeader: { fontSize: 14, fontFamily: fontFamily.extrabold, color: colors.textPrimary, textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 },
 
   pillContainer: { flexDirection: 'row', flexWrap: 'wrap' },
   pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.slate[100], paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginRight: 8, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
-  pillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  pillActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   pillText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.slate[600] },
   pillTextActive: { color: colors.white },
 
